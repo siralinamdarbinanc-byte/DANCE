@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useContent } from '../../context/ContentContext';
 import { BookingStatus, BookingRequest } from '../../types';
 import { Phone, Calendar, Clock, Trash2, CheckCircle2, MessageSquare, AlertCircle, Search, Filter } from 'lucide-react';
+import { useModalBackHandler } from '../../hooks/useModalBackHandler';
 
 interface BookingsManagerProps {
   onNotify: (msg: string) => void;
@@ -12,6 +13,8 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  useModalBackHandler(!!deleteId, () => setDeleteId(null), 'bookingDeleteModal');
 
   const statusBadges: Record<BookingStatus, { label: string; color: string }> = {
     New: { label: 'جدید (بررسی نشده)', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
@@ -199,7 +202,12 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
 
       {/* Delete Modal */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteId(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        >
           <div className="bg-[#181a19] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-right space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-red-400">حذف درخواست رزرو</h3>
             <p className="text-xs text-[#c0c8c4]">آیا از حذف این درخواست مشاوره اطمینان دارید؟</p>

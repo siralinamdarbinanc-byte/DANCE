@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useContent } from '../context/ContentContext';
 import { NavigationPage, TrackItem, Playlist } from '../types';
-import { Play, Pause, Download, Music, Disc, Search, Sparkles, Filter, ShieldCheck } from 'lucide-react';
+import { Play, Pause, Download, Music, Disc, Search, Sparkles, Filter, ShieldCheck, X } from 'lucide-react';
+import { useModalBackHandler } from '../hooks/useModalBackHandler';
 
 interface MusicPageProps {
   onNavigate: (page: NavigationPage) => void;
@@ -12,6 +13,8 @@ export const MusicPage: React.FC<MusicPageProps> = ({ onNavigate }) => {
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+
+  useModalBackHandler(!!selectedPlaylist, () => setSelectedPlaylist(null), 'playlistDetail');
 
   const categories = content.musicCategories || [];
   const tracks = (content.tracks || []).filter((t) => t.active !== false);
@@ -173,9 +176,10 @@ export const MusicPage: React.FC<MusicPageProps> = ({ onNavigate }) => {
               </div>
               <button
                 onClick={() => setSelectedPlaylist(null)}
-                className="text-xs text-[#c0c8c4] hover:text-[#e9c349] bg-[#181a19] px-3 py-1.5 rounded-xl border border-white/10 cursor-pointer"
+                className="flex items-center gap-1 px-4 py-2 text-xs font-bold text-[#e2e3e0] hover:text-[#e9c349] bg-[#181a19] hover:bg-[#202422] border border-[#e9c349]/30 rounded-xl cursor-pointer shadow-md transition-all"
               >
-                بستن
+                <X className="w-4 h-4" />
+                <span>بستن</span>
               </button>
             </div>
 

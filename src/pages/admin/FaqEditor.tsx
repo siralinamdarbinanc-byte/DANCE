@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useContent } from '../../context/ContentContext';
 import { FaqItem } from '../../types';
 import { Plus, Trash2, Edit, Save, ToggleLeft, ToggleRight, X, AlertTriangle, HelpCircle } from 'lucide-react';
+import { useModalBackHandler } from '../../hooks/useModalBackHandler';
 
 interface FaqEditorProps {
   onNotify: (msg: string) => void;
@@ -11,6 +12,9 @@ export const FaqEditor: React.FC<FaqEditorProps> = ({ onNotify }) => {
   const { content, saveFaq, deleteFaq } = useContent();
   const [editingFaq, setEditingFaq] = useState<FaqItem | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  useModalBackHandler(!!editingFaq, () => setEditingFaq(null), 'faqModal');
+  useModalBackHandler(!!deleteId, () => setDeleteId(null), 'faqDeleteModal');
 
   const openNewFaq = () => {
     setEditingFaq({
@@ -117,11 +121,17 @@ export const FaqEditor: React.FC<FaqEditorProps> = ({ onNotify }) => {
 
       {/* Edit FAQ Modal */}
       {editingFaq && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up">
-          <div className="relative w-full max-w-xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingFaq(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up overflow-y-auto"
+        >
+          <div className="relative w-full max-w-xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right my-auto">
             <button
               onClick={() => setEditingFaq(null)}
-              className="absolute top-4 left-4 p-2 text-[#c0c8c4] hover:text-[#e9c349] rounded-full"
+              className="absolute top-4 left-4 p-2 text-[#c0c8c4] hover:text-[#e9c349] hover:bg-white/5 rounded-full flex items-center gap-1 text-xs"
+              title="بستن"
             >
               <X className="w-5 h-5" />
             </button>
@@ -200,7 +210,12 @@ export const FaqEditor: React.FC<FaqEditorProps> = ({ onNotify }) => {
 
       {/* Delete Modal */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteId(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        >
           <div className="bg-[#181a19] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-right space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-red-400">
               <AlertTriangle className="w-6 h-6" />

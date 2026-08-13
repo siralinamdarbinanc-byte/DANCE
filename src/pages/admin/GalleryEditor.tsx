@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useContent } from '../../context/ContentContext';
 import { GalleryItem } from '../../types';
 import { Plus, Trash2, Edit, Save, X, Image as ImageIcon } from 'lucide-react';
+import { useModalBackHandler } from '../../hooks/useModalBackHandler';
 
 interface GalleryEditorProps {
   onNotify: (msg: string) => void;
@@ -11,6 +12,9 @@ export const GalleryEditor: React.FC<GalleryEditorProps> = ({ onNotify }) => {
   const { content, saveGalleryItem, deleteGalleryItem } = useContent();
   const [editingItem, setEditingItem] = useState<GalleryItem | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  useModalBackHandler(!!editingItem, () => setEditingItem(null), 'galEditorModal');
+  useModalBackHandler(!!deleteId, () => setDeleteId(null), 'galEditorDeleteModal');
 
   const openNewItem = () => {
     setEditingItem({
@@ -97,8 +101,13 @@ export const GalleryEditor: React.FC<GalleryEditorProps> = ({ onNotify }) => {
 
       {/* Edit Gallery Modal */}
       {editingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up">
-          <div className="relative w-full max-w-lg bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingItem(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up overflow-y-auto"
+        >
+          <div className="relative w-full max-w-lg bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right my-auto">
             <button
               onClick={() => setEditingItem(null)}
               className="absolute top-4 left-4 p-2 text-[#c0c8c4] hover:text-[#e9c349] rounded-full"
@@ -181,7 +190,12 @@ export const GalleryEditor: React.FC<GalleryEditorProps> = ({ onNotify }) => {
 
       {/* Delete Confirmation */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteId(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        >
           <div className="bg-[#181a19] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-right space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-red-400">حذف تصویر گالری</h3>
             <p className="text-xs text-[#c0c8c4]">آیا از حذف این تصویر اطمینان دارید؟</p>

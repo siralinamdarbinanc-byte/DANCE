@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { X, Calendar, User, Phone, Sparkles, CheckCircle2 } from 'lucide-react';
+import { X, Calendar, User, Phone, Sparkles, CheckCircle2, ArrowRight } from 'lucide-react';
 import { BookingForm } from '../types';
 import { useContent } from '../context/ContentContext';
+import { useModalBackHandler } from '../hooks/useModalBackHandler';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -21,6 +22,13 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, def
     notes: '',
   });
 
+  const resetAndClose = () => {
+    setSubmitted(false);
+    onClose();
+  };
+
+  useModalBackHandler(isOpen, resetAndClose, 'bookingModal');
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -32,32 +40,37 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, def
     setSubmitted(true);
   };
 
-  const resetAndClose = () => {
-    setSubmitted(false);
-    onClose();
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up">
-      <div className="relative w-full max-w-xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 md:p-8 shadow-2xl text-right overflow-hidden">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) resetAndClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in-up overflow-y-auto"
+    >
+      <div className="relative w-full max-w-xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 md:p-8 shadow-2xl text-right overflow-hidden my-auto">
         {/* Glow accent */}
         <div className="absolute -top-24 -left-24 w-48 h-48 bg-[#063b2f] rounded-full blur-3xl opacity-50 pointer-events-none" />
         <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-[#af8d11] rounded-full blur-3xl opacity-20 pointer-events-none" />
 
-        {/* Close Button */}
-        <button
-          onClick={resetAndClose}
-          className="absolute top-4 left-4 p-2 text-[#c0c8c4] hover:text-[#e9c349] hover:bg-white/5 rounded-full transition-colors cursor-pointer"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        {/* Top Header Bar with Close/Back Button */}
+        <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#e9c349]/20 relative z-10">
+          <div className="flex items-center gap-2 text-[#e9c349] text-xs font-semibold">
+            <Sparkles className="w-4 h-4" />
+            <span>مشاوره و تست حضوری اولیه رایگان</span>
+          </div>
+
+          <button
+            onClick={resetAndClose}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#111413] hover:bg-[#202422] border border-[#e9c349]/40 text-[#e2e3e0] hover:text-[#e9c349] rounded-full text-xs font-bold transition-all cursor-pointer shadow-md"
+            title="بستن پنجره (یا کلید بازگشت گوشی)"
+          >
+            <X className="w-4 h-4" />
+            <span>بستن</span>
+          </button>
+        </div>
 
         {!submitted ? (
           <div>
-            <div className="flex items-center gap-2 text-[#e9c349] text-xs font-semibold mb-1">
-              <Sparkles className="w-4 h-4" />
-              <span>مشاوره و تست حضوری اولیه رایگان</span>
-            </div>
             <h3 className="text-xl md:text-2xl font-bold text-[#e2e3e0] mb-2 font-display">
               رزرو جلسه مشاوره رقص عروسی
             </h3>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useContent } from '../../context/ContentContext';
 import { Instructor } from '../../types';
 import { Plus, Trash2, Edit, Save, X, User } from 'lucide-react';
+import { useModalBackHandler } from '../../hooks/useModalBackHandler';
 
 interface InstructorsEditorProps {
   onNotify: (msg: string) => void;
@@ -11,6 +12,9 @@ export const InstructorsEditor: React.FC<InstructorsEditorProps> = ({ onNotify }
   const { content, saveInstructor, deleteInstructor } = useContent();
   const [editingInst, setEditingInst] = useState<Instructor | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  useModalBackHandler(!!editingInst, () => setEditingInst(null), 'instEditorModal');
+  useModalBackHandler(!!deleteId, () => setDeleteId(null), 'instEditorDeleteModal');
 
   const openNewInstructor = () => {
     setEditingInst({
@@ -103,8 +107,13 @@ export const InstructorsEditor: React.FC<InstructorsEditorProps> = ({ onNotify }
 
       {/* Edit Instructor Modal */}
       {editingInst && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up">
-          <div className="relative w-full max-w-xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right max-h-[90vh] overflow-y-auto">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingInst(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up overflow-y-auto"
+        >
+          <div className="relative w-full max-w-xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right max-h-[90vh] overflow-y-auto my-auto">
             <button
               onClick={() => setEditingInst(null)}
               className="absolute top-4 left-4 p-2 text-[#c0c8c4] hover:text-[#e9c349] rounded-full"
@@ -216,7 +225,12 @@ export const InstructorsEditor: React.FC<InstructorsEditorProps> = ({ onNotify }
 
       {/* Delete Modal */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteId(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        >
           <div className="bg-[#181a19] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-right space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-red-400">حذف استاد</h3>
             <p className="text-xs text-[#c0c8c4]">آیا از حذف این استاد اطمینان دارید؟</p>

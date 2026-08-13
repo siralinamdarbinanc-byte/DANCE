@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { NavigationPage } from '../types';
 import { useContent } from '../context/ContentContext';
-import { Menu, X, Calendar, Sparkles } from 'lucide-react';
+import { Menu, X, Calendar, Sparkles, ArrowRight } from 'lucide-react';
+import { useModalBackHandler } from '../hooks/useModalBackHandler';
 
 interface HeaderProps {
   currentPage: NavigationPage;
@@ -12,6 +13,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate, onOpenBooking }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { content } = useContent();
+
+  useModalBackHandler(mobileMenuOpen, () => setMobileMenuOpen(false), 'mobileMenu');
 
   const navLinks: { id: NavigationPage; label: string }[] = [
     { id: 'home', label: content.navigation.home || 'خانه' },
@@ -86,7 +89,25 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate, onOpenB
 
       {/* Mobile Menu Drawer */}
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-40 bg-[#0c0f0e]/95 backdrop-blur-2xl flex flex-col pt-24 px-6 pb-8 lg:hidden animate-fade-in-up">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setMobileMenuOpen(false);
+          }}
+          className="fixed inset-0 z-40 bg-[#0c0f0e]/95 backdrop-blur-2xl flex flex-col pt-6 px-6 pb-8 lg:hidden animate-fade-in-up overflow-y-auto"
+        >
+          {/* Top Bar inside Drawer */}
+          <div className="flex items-center justify-between pb-4 border-b border-[#e9c349]/20 mb-4 shrink-0">
+            <span className="text-[#e9c349] font-bold text-base font-display">منوی اصلی آکادمی</span>
+            <button
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#181a19] border border-[#e9c349]/40 text-[#e2e3e0] hover:text-[#e9c349] rounded-full text-xs font-bold transition-all cursor-pointer shadow-md"
+              title="بستن منو (یا دکمه بازگشت گوشی)"
+            >
+              <X className="w-4 h-4" />
+              <span>بستن منو</span>
+            </button>
+          </div>
+
           <nav className="flex flex-col gap-2 my-auto">
             {navLinks.map((link) => {
               const isActive = currentPage === link.id;

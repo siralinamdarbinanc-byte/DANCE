@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useContent } from '../context/ContentContext';
 import { GalleryItem } from '../types';
 import { X, Play, Image, Sparkles } from 'lucide-react';
+import { useModalBackHandler } from '../hooks/useModalBackHandler';
 
 interface GalleryPageProps {
   onOpenBooking: () => void;
@@ -12,6 +13,8 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ onOpenBooking }) => {
   const galleryItems = content.gallery || [];
   const [filter, setFilter] = useState<'all' | 'tango' | 'bride-solo' | 'group' | 'backstage'>('all');
   const [activeItem, setActiveItem] = useState<GalleryItem | null>(null);
+
+  useModalBackHandler(!!activeItem, () => setActiveItem(null), 'galleryLightbox');
 
   const filteredItems = filter === 'all'
     ? galleryItems
@@ -88,13 +91,20 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ onOpenBooking }) => {
 
       {/* Lightbox Modal */}
       {activeItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl animate-fade-in-up">
-          <div className="relative w-full max-w-4xl bg-[#181a19] border border-[#e9c349]/40 rounded-2xl overflow-hidden p-4 md:p-6 text-right">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveItem(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl animate-fade-in-up overflow-y-auto"
+        >
+          <div className="relative w-full max-w-4xl bg-[#181a19] border border-[#e9c349]/40 rounded-2xl overflow-hidden p-4 md:p-6 text-right my-auto">
             <button
               onClick={() => setActiveItem(null)}
-              className="absolute top-4 left-4 z-10 p-2 bg-[#111413]/80 text-[#e2e3e0] hover:text-[#e9c349] rounded-full border border-[#e9c349]/30"
+              className="absolute top-4 left-4 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-[#111413]/90 hover:bg-[#202422] text-[#e2e3e0] hover:text-[#e9c349] rounded-full border border-[#e9c349]/40 text-xs font-bold transition-all cursor-pointer shadow-md"
+              title="بستن (یا کلید بازگشت)"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
+              <span>بستن</span>
             </button>
 
             <div className="relative h-[60vh] rounded-xl overflow-hidden mb-4">

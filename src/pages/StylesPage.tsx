@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useContent } from '../context/ContentContext';
 import { DanceStyle, NavigationPage } from '../types';
 import { Sparkles, Check, Clock, Award, ArrowLeft, X } from 'lucide-react';
+import { useModalBackHandler } from '../hooks/useModalBackHandler';
 
 interface StylesPageProps {
   onNavigate: (page: NavigationPage) => void;
@@ -12,6 +13,8 @@ export const StylesPage: React.FC<StylesPageProps> = ({ onNavigate, onOpenBookin
   const { content } = useContent();
   const danceStyles = content.styles || [];
   const [selectedStyle, setSelectedStyle] = useState<DanceStyle | null>(null);
+
+  useModalBackHandler(!!selectedStyle, () => setSelectedStyle(null), 'styleDetail');
 
   return (
     <div className="w-full min-h-screen text-right pt-24 pb-16 px-4 md:px-12 max-w-7xl mx-auto">
@@ -89,13 +92,20 @@ export const StylesPage: React.FC<StylesPageProps> = ({ onNavigate, onOpenBookin
 
       {/* Style Detail Modal */}
       {selectedStyle && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up">
-          <div className="relative w-full max-w-2xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 md:p-8 shadow-2xl text-right max-h-[90vh] overflow-y-auto">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedStyle(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up overflow-y-auto"
+        >
+          <div className="relative w-full max-w-2xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 md:p-8 shadow-2xl text-right max-h-[90vh] overflow-y-auto my-auto">
             <button
               onClick={() => setSelectedStyle(null)}
-              className="absolute top-4 left-4 p-2 text-[#c0c8c4] hover:text-[#e9c349] hover:bg-white/5 rounded-full"
+              className="absolute top-4 left-4 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-[#111413]/90 hover:bg-[#202422] text-[#e2e3e0] hover:text-[#e9c349] rounded-full border border-[#e9c349]/40 text-xs font-bold transition-all cursor-pointer shadow-md"
+              title="بستن (یا کلید بازگشت)"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
+              <span>بستن</span>
             </button>
 
             <div className="relative h-64 rounded-xl overflow-hidden mb-6">

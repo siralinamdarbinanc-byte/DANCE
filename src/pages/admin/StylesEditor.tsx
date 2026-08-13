@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useContent } from '../../context/ContentContext';
 import { DanceStyle } from '../../types';
 import { Plus, Trash2, Edit, Save, X, AlertTriangle } from 'lucide-react';
+import { useModalBackHandler } from '../../hooks/useModalBackHandler';
 
 interface StylesEditorProps {
   onNotify: (msg: string) => void;
@@ -11,6 +12,9 @@ export const StylesEditor: React.FC<StylesEditorProps> = ({ onNotify }) => {
   const { content, saveStyle, deleteStyle } = useContent();
   const [editingStyle, setEditingStyle] = useState<DanceStyle | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  useModalBackHandler(!!editingStyle, () => setEditingStyle(null), 'styleEditorModal');
+  useModalBackHandler(!!deleteId, () => setDeleteId(null), 'styleEditorDeleteModal');
 
   const openNewStyle = () => {
     setEditingStyle({
@@ -111,8 +115,13 @@ export const StylesEditor: React.FC<StylesEditorProps> = ({ onNotify }) => {
 
       {/* Edit Style Modal */}
       {editingStyle && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up">
-          <div className="relative w-full max-w-2xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right max-h-[90vh] overflow-y-auto">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingStyle(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up overflow-y-auto"
+        >
+          <div className="relative w-full max-w-2xl bg-[#181a19] border border-[#e9c349]/30 rounded-2xl p-6 shadow-2xl text-right max-h-[90vh] overflow-y-auto my-auto">
             <button
               onClick={() => setEditingStyle(null)}
               className="absolute top-4 left-4 p-2 text-[#c0c8c4] hover:text-[#e9c349] rounded-full"
@@ -245,7 +254,12 @@ export const StylesEditor: React.FC<StylesEditorProps> = ({ onNotify }) => {
 
       {/* Delete Confirmation */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteId(null);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        >
           <div className="bg-[#181a19] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-right space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-red-400">
               <AlertTriangle className="w-6 h-6" />

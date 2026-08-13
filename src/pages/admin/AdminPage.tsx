@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useContent } from '../../context/ContentContext';
 import { NavigationPage } from '../../types';
+import { useModalBackHandler } from '../../hooks/useModalBackHandler';
 import {
   LayoutDashboard,
   Home,
@@ -44,6 +45,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
+
+  useModalBackHandler(mobileMenuOpen, () => setMobileMenuOpen(false), 'adminMobileMenu');
+  useModalBackHandler(showResetModal, () => setShowResetModal(false), 'adminResetModal');
 
   const notify = (msg: string) => {
     setToastMessage(msg);
@@ -194,8 +198,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
 
       {/* Reset Confirmation Modal */}
       {showResetModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="bg-[#181a19] border border-red-500/50 rounded-2xl p-6 max-w-md w-full text-right space-y-4 shadow-2xl">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowResetModal(false);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        >
+          <div className="bg-[#181a19] border border-red-500/50 rounded-2xl p-6 max-w-md w-full text-right space-y-4 shadow-2xl relative">
+            <button
+              onClick={() => setShowResetModal(false)}
+              className="absolute top-4 left-4 p-1.5 text-[#c0c8c4] hover:text-white bg-[#111413] rounded-full"
+            >
+              <X className="w-4 h-4" />
+            </button>
             <h3 className="text-lg font-bold text-red-400 font-display">هشدار: بازگردانی به متون اولیه</h3>
             <p className="text-xs text-[#c0c8c4] leading-relaxed">
               آیا مطمئن هستید که می‌خواهید تمام تغییرات خود را پاک کرده و تمام قیمت‌ها، متون و سوالات متداول را به حالت کارخانه‌ای اولیه آکادمی بازگردانید؟
