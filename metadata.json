@@ -1,0 +1,6 @@
+{
+  "name": "Dance Academy - آکادمی رقص عروسی",
+  "description": "آکادمی اختصاصی آموزش رقص عروس و داماد، تانگو، عروس سولو و سبک‌های سینمایی",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
