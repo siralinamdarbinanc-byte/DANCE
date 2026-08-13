@@ -75,10 +75,11 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate, onOpenB
           {/* Mobile menu button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 text-[#e2e3e0] hover:text-[#e9c349] rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+            className="lg:hidden p-2 text-[#e2e3e0] hover:text-[#e9c349] rounded-lg hover:bg-white/5 transition-colors cursor-pointer flex items-center gap-1.5"
             aria-label="تغییر منو"
           >
             {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            <span className="text-sm font-medium">منو</span>
           </button>
         </div>
       </header>
