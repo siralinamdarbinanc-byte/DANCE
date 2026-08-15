@@ -24,9 +24,14 @@ export interface R2Bucket {
   list: (options?: any) => Promise<{ objects: Array<{ key: string; size: number; uploaded: Date; httpMetadata?: any }> }>;
 }
 
+export interface Fetcher {
+  fetch: (request: Request | string, init?: RequestInit) => Promise<Response>;
+}
+
 export interface Env {
   DB?: D1Database;
   MEDIA_BUCKET?: R2Bucket;
+  ASSETS?: Fetcher;
   ENVIRONMENT?: string;
   JWT_SECRET?: string;
 }
@@ -981,13 +986,33 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // 7. FALLBACK
+      // 7. STATIC ASSETS & REACT SPA FRONTEND SERVING (dist)
       // -------------------------------------------------------------
       if (url.pathname.startsWith('/api/')) {
         return new Response(JSON.stringify({ success: false, message: 'API Route Not Found' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
+      }
+
+      // If Cloudflare Workers Static Assets binding is present
+      if (env.ASSETS) {
+        const response = await env.ASSETS.fetch(request);
+        if (response.status !== 404) {
+          return response;
+        }
+
+        // SPA Navigation Fallback: For GET/HEAD requests to client-side routes (/admin, /tango, etc.), serve /index.html
+        if (request.method === 'GET' || request.method === 'HEAD') {
+          const indexUrl = new URL('/index.html', request.url);
+          const indexReq = new Request(indexUrl.toString(), request);
+          const spaIndexResponse = await env.ASSETS.fetch(indexReq);
+          if (spaIndexResponse.status !== 404) {
+            return spaIndexResponse;
+          }
+        }
+
+        return response;
       }
 
       return new Response('Dance Academy Cloudflare Worker Backend Ready', {
