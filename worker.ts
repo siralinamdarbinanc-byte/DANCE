@@ -206,7 +206,7 @@ async function fetchFromGitHubContents(
     return { ok: false, status: 500, data: { error: 'GITHUB_TOKEN_NOT_SET' } };
   }
 
-  const owner = env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+  const owner = env.GITHUB_REPO_OWNER || 'siralinamdarinc-byte';
   const repo = env.GITHUB_REPO_NAME || 'DANCE';
   const branch = env.GITHUB_BRANCH || 'main';
 
@@ -220,7 +220,8 @@ async function fetchFromGitHubContents(
     const res = await fetch(url, {
       method: options.method || 'GET',
       headers: {
-        Accept: 'application/vnd.github.v3+json',
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2026-03-10',
         'User-Agent': 'DanceAcademy-CloudflareWorker/1.0',
         Authorization: `Bearer ${token}`,
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
@@ -1311,7 +1312,7 @@ export default {
           });
         }
 
-        const owner = env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+        const owner = env.GITHUB_REPO_OWNER || 'siralinamdarinc-byte';
         const repo = env.GITHUB_REPO_NAME || 'DANCE';
         const branch = env.GITHUB_BRANCH || 'main';
         const nowFa = new Date().toLocaleDateString('fa-IR');
@@ -1336,7 +1337,7 @@ export default {
         const putRes = await fetchFromGitHubContents(fullRepoPath, env, {
           method: 'PUT',
           body: {
-            message: `Upload media asset: ${safeName} via Admin Media Manager`,
+            message: `media: upload ${safeName}`,
             content: base64Content,
             branch,
             ...(existingSha ? { sha: existingSha } : {}),
@@ -1346,8 +1347,11 @@ export default {
         if (!putRes.ok) {
           return new Response(
             JSON.stringify({
-              error: `خطا در ثبت فایل در مخزن گیت‌هاب: ${putRes.data?.message || 'نامشخص'}`,
-              details: putRes.data,
+              success: false,
+              error: `GitHub rejected the upload: ${putRes.data?.message || 'نامشخص'}`,
+              github_status: putRes.status,
+              github_message: putRes.data?.message,
+              status: putRes.status || 500,
             }),
             { status: putRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
           );
@@ -1355,9 +1359,13 @@ export default {
 
         // Step 3: Verification - GET GitHub contents again to verify that the file actually exists
         const verifyRes = await fetchFromGitHubContents(fullRepoPath, env);
-        if (!verifyRes.ok || !verifyRes.data) {
+        if (!verifyRes.ok || !verifyRes.data || verifyRes.data.type !== 'file' || !verifyRes.data.sha) {
           return new Response(
-            JSON.stringify({ error: 'فایل به گیت‌هاب ارسال شد اما در اعتبارسنجی نهایی مخزن یافت نشد.' }),
+            JSON.stringify({
+              success: false,
+              error: 'فایل به گیت‌هاب ارسال شد اما در اعتبارسنجی نهایی مخزن تأیید نشد.',
+              status: 500,
+            }),
             { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
           );
         }
@@ -1376,6 +1384,7 @@ export default {
           mimeType: validation.mimeType || 'application/octet-stream',
           url: cleanUrl,
           rawUrl,
+          download_url: verifiedFile.download_url || rawUrl,
           path: fullRepoPath,
           sha: createdSha,
           sizeBytes: verifiedFile.size || fileBuffer.byteLength,
@@ -1397,10 +1406,23 @@ export default {
           }
         }
 
-        return new Response(JSON.stringify({ success: true, asset: newAsset }), {
-          status: 201,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+        return new Response(
+          JSON.stringify({
+            success: true,
+            file: {
+              name: safeName,
+              path: fullRepoPath,
+              size: verifiedFile.size || fileBuffer.byteLength,
+              sha: createdSha,
+              download_url: verifiedFile.download_url || rawUrl,
+            },
+            asset: newAsset,
+          }),
+          {
+            status: 201,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          }
+        );
       }
 
       // 6.3 Rename / Move Media in GitHub Repository (PUT /api/media/rename or PUT /api/media)

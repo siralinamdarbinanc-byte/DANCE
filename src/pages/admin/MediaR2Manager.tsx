@@ -55,7 +55,7 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
     maxSizeBytes: number;
   }>({
     githubConfigured: false,
-    owner: 'siralinamdarbinanc-byte',
+    owner: 'siralinamdarinc-byte',
     repo: 'DANCE',
     branch: 'main',
     directories: ['public/images', 'public/audio', 'public/videos'],
@@ -67,6 +67,15 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadFolder, setUploadFolder] = useState<'public/images' | 'public/audio' | 'public/videos'>('public/images');
   const [customUploadName, setCustomUploadName] = useState<string>('');
+
+  // Upload Progress & Status States
+  const [uploadProgress, setUploadProgress] = useState<{
+    loaded: number;
+    total: number;
+    percentage: number;
+  }>({ loaded: 0, total: 0, percentage: 0 });
+  const [uploadPhase, setUploadPhase] = useState<'idle' | 'uploading' | 'verifying' | 'success' | 'error'>('idle');
+  const [uploadStatusMessage, setUploadStatusMessage] = useState<string>('');
 
   const [showAddUrlModal, setShowAddUrlModal] = useState<boolean>(false);
   const [newUrl, setNewUrl] = useState<string>('');
@@ -152,22 +161,57 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
 
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadFile) return;
+    if (!uploadFile || uploading) return;
 
     setUploading(true);
+    setUploadPhase('uploading');
+    setUploadProgress({ loaded: 0, total: uploadFile.size, percentage: 0 });
+    setUploadStatusMessage(`در حال ارسال فایل ${uploadFile.name}...`);
+
     try {
-      const res = await api.uploadMedia(uploadFile, uploadFolder, customUploadName.trim() || uploadFile.name);
-      if (res.success && res.asset) {
-        setAssets((prev) => [res.asset!, ...prev.filter((a) => a.path !== res.asset!.path && a.id !== res.asset!.id)]);
-        onNotify(`فایل «${res.asset.filename}» با موفقیت در پوشه ${uploadFolder} ثبت شد.`);
-        setShowUploadModal(false);
-        setUploadFile(null);
-        setCustomUploadName('');
+      const res = await api.uploadMedia(
+        uploadFile,
+        uploadFolder,
+        customUploadName.trim() || uploadFile.name,
+        (progress) => {
+          setUploadProgress(progress);
+          if (progress.percentage >= 100) {
+            setUploadPhase('verifying');
+            setUploadStatusMessage('در حال ثبت در گیتهاب...');
+          } else {
+            setUploadStatusMessage(`در حال آپلود... (${progress.percentage}%)`);
+          }
+        }
+      );
+
+      if (res.success && (res.asset || res.file)) {
+        setUploadPhase('success');
+        setUploadStatusMessage('فایل با موفقیت در گیت‌هاب بارگذاری و تأیید شد.');
+        const uploadedName = res.asset?.filename || res.file?.name || uploadFile.name;
+        onNotify(`فایل «${uploadedName}» با موفقیت در مخزن گیت‌هاب بارگذاری و تأیید شد.`);
+
+        // Deterministic flow: refresh entire media list from GitHub
+        await loadMedia(true);
+
+        setTimeout(() => {
+          setShowUploadModal(false);
+          setUploadFile(null);
+          setCustomUploadName('');
+          setUploadPhase('idle');
+          setUploadProgress({ loaded: 0, total: 0, percentage: 0 });
+          setUploadStatusMessage('');
+        }, 1200);
       } else {
-        onNotify(res.error || 'خطا در ثبت فایل در مخزن');
+        const errorMsg = res.error || 'خطا در ثبت فایل در مخزن گیت‌هاب';
+        setUploadPhase('error');
+        setUploadStatusMessage(errorMsg);
+        onNotify(errorMsg);
       }
     } catch (err: any) {
-      onNotify(err?.message || 'خطا در ارسال فایل');
+      const errorMsg = err?.message || 'خطا در ارسال فایل به سرور';
+      setUploadPhase('error');
+      setUploadStatusMessage(errorMsg);
+      onNotify(errorMsg);
     } finally {
       setUploading(false);
     }
@@ -764,32 +808,94 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
               </div>
 
               {uploadFile && (
-                <div className="bg-[#111413] p-3 rounded-xl border border-[#e9c349]/15 flex items-center justify-between text-xs font-mono">
-                  <span className="text-[#c0c8c4]">حجم فایل:</span>
-                  <span className="text-[#e9c349] font-bold">{formatSize(uploadFile.size)}</span>
+                <div className="bg-[#111413] p-3 rounded-xl border border-[#e9c349]/15 space-y-2 font-mono">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[#c0c8c4] truncate max-w-[200px]" dir="ltr">{uploadFile.name}</span>
+                    <span className="text-[#e9c349] font-bold">{formatSize(uploadFile.size)}</span>
+                  </div>
+
+                  {/* Upload Progress Bar & Status */}
+                  {uploading && (
+                    <div className="space-y-2 pt-2 border-t border-[#e9c349]/10">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-[#e9c349] font-medium flex items-center gap-1.5">
+                          <RefreshCw className="w-3 h-3 animate-spin text-[#e9c349]" />
+                          <span>{uploadStatusMessage}</span>
+                        </span>
+                        <span className="text-[#e9c349] font-bold">
+                          {uploadPhase === 'verifying' ? 'در انتظار تأیید' : `${uploadProgress.percentage}%`}
+                        </span>
+                      </div>
+
+                      <div className="w-full h-2.5 bg-black/50 rounded-full overflow-hidden border border-[#e9c349]/20 p-0.5">
+                        <div
+                          className={`h-full rounded-full transition-all duration-200 ${
+                            uploadPhase === 'verifying'
+                              ? 'bg-amber-400 animate-pulse w-full'
+                              : uploadPhase === 'success'
+                              ? 'bg-emerald-500 w-full'
+                              : uploadPhase === 'error'
+                              ? 'bg-red-500'
+                              : 'bg-gradient-to-r from-[#e9c349] to-emerald-400'
+                          }`}
+                          style={{
+                            width: uploadPhase === 'verifying' || uploadPhase === 'success' ? '100%' : `${uploadProgress.percentage}%`,
+                          }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-[#c0c8c4]">
+                        <span>
+                          {formatSize(uploadProgress.loaded)} / {formatSize(uploadProgress.total || uploadFile.size)}
+                        </span>
+                        <span>
+                          {uploadPhase === 'verifying'
+                            ? 'بررسی سلامت و ثبت در شاخه main'
+                            : `${uploadProgress.percentage}% آپلود شده`}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {!uploading && uploadPhase === 'error' && (
+                    <div className="p-2.5 bg-red-950/40 border border-red-500/30 rounded-lg text-red-300 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+                      <span>{uploadStatusMessage}</span>
+                    </div>
+                  )}
+
+                  {!uploading && uploadPhase === 'success' && (
+                    <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-emerald-300 text-xs flex items-center gap-2">
+                      <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+                      <span>{uploadStatusMessage}</span>
+                    </div>
+                  )}
                 </div>
               )}
 
               <div className="flex items-center justify-end gap-3 pt-3">
                 <button
                   type="button"
+                  disabled={uploading}
                   onClick={() => {
                     setShowUploadModal(false);
                     setUploadFile(null);
+                    setUploadPhase('idle');
+                    setUploadStatusMessage('');
                   }}
-                  className="px-4 py-2 rounded-xl text-xs text-[#c0c8c4] hover:bg-white/5 cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-xs text-[#c0c8c4] hover:bg-white/5 disabled:opacity-50 cursor-pointer"
                 >
                   انصراف
                 </button>
                 <button
                   type="submit"
-                  disabled={uploading}
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#e9c349] text-[#111413] hover:brightness-110 cursor-pointer shadow-lg flex items-center gap-2"
+                  disabled={uploading || !uploadFile}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#e9c349] text-[#111413] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-lg flex items-center gap-2"
                 >
                   {uploading ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>در حال ارسال به گیت‌هاب...</span>
+                      <span>{uploadPhase === 'verifying' ? 'در حال ثبت در گیتهاب...' : 'در حال آپلود...'}</span>
                     </>
                   ) : (
                     <span>تأیید و آپلود فایل</span>

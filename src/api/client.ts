@@ -252,7 +252,7 @@ export const api = {
     }
     return {
       githubConfigured: false,
-      owner: 'siralinamdarbinanc-byte',
+      owner: 'siralinamdarinc-byte',
       repo: 'DANCE',
       branch: 'main',
       directories: ['public/images', 'public/audio', 'public/videos'],
@@ -281,31 +281,97 @@ export const api = {
   async uploadMedia(
     file: File,
     folder?: 'public/images' | 'public/audio' | 'public/videos',
-    customFilename?: string
-  ): Promise<{ success: boolean; asset?: MediaAsset; error?: string }> {
-    try {
+    customFilename?: string,
+    onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void
+  ): Promise<{ success: boolean; asset?: MediaAsset; file?: any; error?: string; status?: number }> {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/media/upload`, true);
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('admin_auth_token') : null;
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = (event: ProgressEvent) => {
+          if (event.lengthComputable) {
+            const percentage = Math.round((event.loaded / event.total) * 100);
+            onProgress({
+              loaded: event.loaded,
+              total: event.total,
+              percentage,
+            });
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        let responseJson: any = null;
+        try {
+          responseJson = JSON.parse(xhr.responseText);
+        } catch {
+          responseJson = null;
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (responseJson && responseJson.success) {
+            resolve({
+              success: true,
+              asset: responseJson.asset,
+              file: responseJson.file,
+            });
+          } else {
+            resolve({
+              success: false,
+              error: responseJson?.error || 'پاسخ نامعتبر از سرور دریافت شد.',
+              status: xhr.status,
+            });
+          }
+        } else {
+          const errMsg =
+            responseJson?.error ||
+            responseJson?.message ||
+            `خطا در آپلود فایل (کد ${xhr.status})`;
+          resolve({
+            success: false,
+            error: errMsg,
+            status: xhr.status,
+          });
+        }
+      };
+
+      xhr.onerror = () => {
+        resolve({
+          success: false,
+          error: 'خطا در ارتباط با سرور هنگام آپلود فایل',
+          status: 0,
+        });
+      };
+
+      xhr.ontimeout = () => {
+        resolve({
+          success: false,
+          error: 'مهلت زمان ارسال فایل به پایان رسید (Timeout)',
+          status: 408,
+        });
+      };
+
+      xhr.onabort = () => {
+        resolve({
+          success: false,
+          error: 'عملیات آپلود توسط کاربر لغو شد.',
+          status: 0,
+        });
+      };
+
       const formData = new FormData();
       formData.append('file', file);
       if (folder) formData.append('folder', folder);
       if (customFilename) formData.append('filename', customFilename);
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem('admin_auth_token') : null;
-
-      const res = await fetch(`${API_BASE}/media/upload`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        return { success: true, asset: data.asset || data };
-      }
-      return { success: false, error: data.error || 'خطا در آپلود فایل به مخزن' };
-    } catch (e: any) {
-      console.error('File upload error:', e);
-      return { success: false, error: e?.message || 'خطای شبکه در هنگام آپلود فایل' };
-    }
+      xhr.send(formData);
+    });
   },
 
   async renameMedia(

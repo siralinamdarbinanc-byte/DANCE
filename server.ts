@@ -14,7 +14,7 @@ const upload = multer({
 
 // GitHub API Environment Configuration
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const GITHUB_REPO_OWNER = process.env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+const GITHUB_REPO_OWNER = process.env.GITHUB_REPO_OWNER || 'siralinamdarinc-byte';
 const GITHUB_REPO_NAME = process.env.GITHUB_REPO_NAME || 'DANCE';
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
 
@@ -48,7 +48,8 @@ async function callGitHubContentsApi(
     const res = await fetch(url, {
       method: options.method || 'GET',
       headers: {
-        Accept: 'application/vnd.github.v3+json',
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2026-03-10',
         'User-Agent': 'DanceAcademy-Server/1.0',
         Authorization: `Bearer ${GITHUB_TOKEN}`,
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
@@ -121,8 +122,8 @@ let mediaAssetsStore: any[] = [
 
 const ALLOWED_DIRECTORIES = ['public/images', 'public/audio', 'public/videos'] as const;
 const ALLOWED_EXTENSIONS = {
-  image: ['.jpg', '.jpeg', '.png', '.webp'],
-  audio: ['.mp3', '.wav', '.m4a'],
+  image: ['.jpg', '.jpeg', '.png', '.webp', '.gif'],
+  audio: ['.mp3', '.wav', '.m4a', '.ogg'],
   video: ['.mp4', '.webm', '.mov'],
 };
 const MIME_MAP: Record<string, string> = {
@@ -130,9 +131,11 @@ const MIME_MAP: Record<string, string> = {
   jpeg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
+  gif: 'image/gif',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
   m4a: 'audio/mp4',
+  ogg: 'audio/ogg',
   mp4: 'video/mp4',
   webm: 'video/webm',
   mov: 'video/quicktime',
@@ -531,6 +534,7 @@ app.get('/api/media', async (req: Request, res: Response) => {
 
 // Upload Media Handler (Supports multipart file and base64 JSON)
 const handleUploadMediaRequest = async (req: Request, res: Response) => {
+  console.log('[MEDIA] upload request received');
   let fileBuffer: Buffer | null = null;
   let originalName = '';
   let targetFolder: 'public/images' | 'public/audio' | 'public/videos' = 'public/images';
@@ -552,19 +556,21 @@ const handleUploadMediaRequest = async (req: Request, res: Response) => {
     try {
       fileBuffer = Buffer.from(req.body.contentBase64, 'base64');
     } catch {
-      return res.status(400).json({ error: 'محتوای فایل base64 نامعتبر است.' });
+      return res.status(400).json({ success: false, error: 'محتوای فایل base64 نامعتبر است.', status: 400 });
     }
   } else {
-    return res.status(400).json({ error: 'هیچ فایلی برای آپلود ارسال نشده است.' });
+    return res.status(400).json({ success: false, error: 'هیچ فایلی برای آپلود ارسال نشده است.', status: 400 });
   }
 
   if (!fileBuffer || fileBuffer.length === 0) {
-    return res.status(400).json({ error: 'فایل ارسالی خالی است.' });
+    return res.status(400).json({ success: false, error: 'فایل ارسالی خالی است.', status: 400 });
   }
 
   if (fileBuffer.length > MAX_MEDIA_SIZE_BYTES) {
     return res.status(400).json({
+      success: false,
       error: `حجم فایل بیشتر از سقف مجاز ۱۰۰ مگابایت است (${(fileBuffer.length / 1024 / 1024).toFixed(1)}MB).`,
+      status: 400,
     });
   }
 
@@ -574,9 +580,12 @@ const handleUploadMediaRequest = async (req: Request, res: Response) => {
     .replace(/\s+/g, '_')
     .trim();
 
+  console.log(`[MEDIA] filename=${safeName}`);
+  console.log(`[MEDIA] size=${fileBuffer.length}`);
+
   const extMatch = safeName.match(/\.([a-zA-Z0-9]+)$/);
   if (!extMatch) {
-    return res.status(400).json({ error: 'فایل فاقد پسوند مجاز است.' });
+    return res.status(400).json({ success: false, error: 'فایل فاقد پسوند مجاز است.', status: 400 });
   }
   const ext = `.${extMatch[1].toLowerCase()}`;
 
@@ -588,20 +597,26 @@ const handleUploadMediaRequest = async (req: Request, res: Response) => {
     targetFolder = 'public/videos';
   } else {
     return res.status(400).json({
-      error: `پسوند ${ext} پشتیبانی نمی‌شود. پسوندهای مجاز: تصاویر (jpg, jpeg, png, webp) | موزیک (mp3, wav, m4a) | ویدیو (mp4, webm, mov)`,
+      success: false,
+      error: `پسوند ${ext} پشتیبانی نمی‌شود. پسوندهای مجاز: تصاویر (jpg, jpeg, png, webp, gif) | موزیک (mp3, wav, m4a, ogg) | ویدیو (mp4, webm, mov)`,
+      status: 400,
     });
   }
+
+  console.log(`[MEDIA] destination=${targetFolder}`);
 
   const fullRepoPath = `${targetFolder}/${safeName}`;
   const validation = sanitizeAndValidateMediaPath(fullRepoPath);
   if (!validation.valid) {
-    return res.status(400).json({ error: validation.error });
+    return res.status(400).json({ success: false, error: validation.error, status: 400 });
   }
 
   if (!GITHUB_TOKEN) {
     return res.status(400).json({
-      error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) در سرور تنظیم نشده است. لطفاً متغیر GITHUB_TOKEN را به متغیرهای محیطی اضافه فرمایید.',
+      success: false,
+      error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) در سرور تنظیم نشده است.',
       code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+      status: 400,
     });
   }
 
@@ -614,32 +629,45 @@ const handleUploadMediaRequest = async (req: Request, res: Response) => {
     existingSha = checkRes.data.sha;
   }
 
+  console.log('[MEDIA] github PUT started');
+
   // Step 2: PUT file to GitHub Contents API
   const putRes = await callGitHubContentsApi(fullRepoPath, {
     method: 'PUT',
     body: {
-      message: `Upload media asset: ${safeName} via Admin Media Manager`,
+      message: `media: upload ${safeName}`,
       content: base64Content,
       branch: GITHUB_BRANCH,
       ...(existingSha ? { sha: existingSha } : {}),
     },
   });
 
+  console.log(`[MEDIA] github PUT status=${putRes.status}`);
+
   if (!putRes.ok) {
     const errMsg = putRes.data?.message || 'خطا در ثبت فایل در مخزن گیت‌هاب';
     return res.status(putRes.status || 500).json({
-      error: `خطا از سوی GitHub API (${putRes.status}): ${errMsg}`,
-      details: putRes.data,
+      success: false,
+      error: `GitHub rejected the upload: ${errMsg}`,
+      github_status: putRes.status,
+      github_message: errMsg,
+      status: putRes.status || 500,
     });
   }
 
   // Step 3: Verification - GET GitHub contents again to verify that the file actually exists
   const verifyRes = await callGitHubContentsApi(fullRepoPath);
-  if (!verifyRes.ok || !verifyRes.data) {
+  console.log(`[MEDIA] github verification GET status=${verifyRes.status}`);
+
+  if (!verifyRes.ok || !verifyRes.data || verifyRes.data.type !== 'file' || !verifyRes.data.sha) {
     return res.status(500).json({
-      error: 'فایل به گیت‌هاب ارسال شد اما در اعتبارسنجی نهایی مخزن یافت نشد.',
+      success: false,
+      error: 'فایل به گیت‌هاب ارسال شد اما در اعتبارسنجی نهایی مخزن تأیید نشد.',
+      status: 500,
     });
   }
+
+  console.log('[MEDIA] upload verified successfully');
 
   const verifiedFile = verifyRes.data;
   const createdSha = verifiedFile.sha || putRes.data?.content?.sha || existingSha || 'sha-verified';
@@ -656,6 +684,7 @@ const handleUploadMediaRequest = async (req: Request, res: Response) => {
     mimeType: validation.mimeType || 'application/octet-stream',
     url: cleanUrl,
     rawUrl,
+    download_url: verifiedFile.download_url || rawUrl,
     path: fullRepoPath,
     sha: createdSha,
     sizeBytes: verifiedFile.size || fileBuffer.length,
@@ -664,7 +693,17 @@ const handleUploadMediaRequest = async (req: Request, res: Response) => {
     source: 'github',
   };
 
-  return res.status(201).json({ success: true, asset: newAsset });
+  return res.status(201).json({
+    success: true,
+    file: {
+      name: safeName,
+      path: fullRepoPath,
+      size: verifiedFile.size || fileBuffer.length,
+      sha: createdSha,
+      download_url: verifiedFile.download_url || rawUrl,
+    },
+    asset: newAsset,
+  });
 };
 
 app.post('/api/media/upload', verifyAdminAuth, upload.single('file'), handleUploadMediaRequest);
