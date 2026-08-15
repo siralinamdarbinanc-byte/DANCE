@@ -252,8 +252,8 @@ export const api = {
     }
     return {
       githubConfigured: false,
-      owner: 'aliinndd',
-      repo: 'dance',
+      owner: 'siralinamdarbinanc-byte',
+      repo: 'DANCE',
       branch: 'main',
       directories: ['public/images', 'public/audio', 'public/videos'],
       maxSizeBytes: 104857600,

@@ -813,6 +813,14 @@ app.delete('/api/media', verifyAdminAuth, async (req: Request, res: Response) =>
     });
   }
 
+  // Verification step: verify path no longer exists
+  const verifyDeleteRes = await callGitHubContentsApi(validation.normalizedPath);
+  if (verifyDeleteRes.ok && verifyDeleteRes.status === 200) {
+    return res.status(500).json({
+      error: 'درخواست حذف به گیت‌هاب ارسال شد اما فایل هنوز در مخزن وجود دارد.',
+    });
+  }
+
   res.json({ success: true, path: validation.normalizedPath });
 });
 

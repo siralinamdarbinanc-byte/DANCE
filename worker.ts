@@ -1653,6 +1653,15 @@ export default {
               { status: deleteRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
             );
           }
+
+          // Verify file is deleted
+          const verifyDeleteRes = await fetchFromGitHubContents(validation.normalizedPath, env);
+          if (verifyDeleteRes.ok && verifyDeleteRes.status === 200) {
+            return new Response(
+              JSON.stringify({ error: 'درخواست حذف ارسال شد اما فایل همچنان در مخزن گیت‌هاب یافت می‌شود.' }),
+              { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
+          }
         }
 
         // Also clean up from D1 / memoryStore
