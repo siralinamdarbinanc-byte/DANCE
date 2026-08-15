@@ -9,7 +9,7 @@ bucket = "./dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "dance_academy_db"
-database_id = "00000000-00000006-000050c8-a7ef3c9746e6e464d4f303c2699484c6"
+database_id = "4bdeeea2-bb10-489e-99b3-51bf78d9b096"
 
 # ---------------------------------------------------------------------------
 # CLOUDFLARE R2 STORAGE (اختیاری - فعلاً غیرفعال به دلیل عدم نیاز به کارت پرداخت)
