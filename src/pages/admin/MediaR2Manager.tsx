@@ -100,6 +100,9 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
   // Video Preview Modal
   const [previewVideo, setPreviewVideo] = useState<{ url: string; filename: string } | null>(null);
 
+  const headerFileInputRef = useRef<HTMLInputElement | null>(null);
+  const modalFileInputRef = useRef<HTMLInputElement | null>(null);
+
   const loadMedia = async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
@@ -425,17 +428,29 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
             <span>افزودن لینک خارجی</span>
           </button>
 
-          <label className="bg-gradient-to-r from-[#e9c349] to-[#c9a329] text-[#111413] hover:brightness-110 font-bold px-4 py-2.5 rounded-xl cursor-pointer transition-all shadow-lg flex items-center gap-2 text-xs shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              if (headerFileInputRef.current) {
+                headerFileInputRef.current.click();
+              } else {
+                setShowUploadModal(true);
+              }
+            }}
+            disabled={uploading}
+            className="bg-gradient-to-r from-[#e9c349] to-[#c9a329] text-[#111413] hover:brightness-110 font-bold px-4 py-2.5 rounded-xl cursor-pointer transition-all shadow-lg flex items-center gap-2 text-xs shrink-0 disabled:opacity-50"
+          >
             <Upload className="w-4 h-4" />
             <span>آپلود فایل جدید</span>
-            <input
-              type="file"
-              accept="image/*,audio/*,video/*"
-              onChange={handleNativeFileInput}
-              disabled={uploading}
-              className="hidden"
-            />
-          </label>
+          </button>
+          <input
+            type="file"
+            ref={headerFileInputRef}
+            accept="image/*,audio/*,video/*"
+            onChange={handleNativeFileInput}
+            disabled={uploading}
+            className="hidden"
+          />
         </div>
       </div>
 
@@ -763,6 +778,66 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
             </div>
 
             <form onSubmit={handleUploadSubmit} className="space-y-4">
+              {/* File Selector Dropzone / Picker */}
+              <div>
+                <label className="block text-xs font-medium text-[#c0c8c4] mb-1">
+                  فایل انتخابی:
+                </label>
+                <div
+                  onClick={() => modalFileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all ${
+                    uploadFile
+                      ? 'border-emerald-500/50 bg-emerald-950/20 hover:bg-emerald-950/30'
+                      : 'border-[#e9c349]/40 bg-[#111413] hover:border-[#e9c349] hover:bg-white/5'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    ref={modalFileInputRef}
+                    accept="image/*,audio/*,video/*"
+                    onChange={handleNativeFileInput}
+                    disabled={uploading}
+                    className="hidden"
+                  />
+                  {uploadFile ? (
+                    <div className="flex items-center justify-between gap-2 text-right">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
+                          {uploadFile.type.startsWith('audio/') ? (
+                            <Music className="w-5 h-5" />
+                          ) : uploadFile.type.startsWith('video/') ? (
+                            <Video className="w-5 h-5" />
+                          ) : (
+                            <ImageIcon className="w-5 h-5" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-[#e2e3e0] truncate max-w-[240px]" dir="ltr">
+                            {uploadFile.name}
+                          </p>
+                          <p className="text-[11px] text-[#c0c8c4] font-mono mt-0.5">
+                            {formatSize(uploadFile.size)} • {uploadFile.type || 'فایل استاندارد'}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] bg-white/10 hover:bg-white/20 text-[#e9c349] px-2.5 py-1 rounded-lg transition-colors">
+                        تغییر فایل
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="py-3 flex flex-col items-center justify-center gap-2 text-[#c0c8c4]">
+                      <Upload className="w-6 h-6 text-[#e9c349] animate-bounce" />
+                      <p className="text-xs font-bold text-[#e2e3e0]">
+                        برای انتخاب فایل از دستگاه اینجا کلیک کنید
+                      </p>
+                      <p className="text-[10px] text-[#c0c8c4]/80">
+                        تصاویر (JPG, PNG, WEBP, GIF) • موزیک (MP3, WAV) • ویدیو (MP4, WEBM)
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-[#c0c8c4] mb-1">
                   پوشه مقصد در پروژه:
