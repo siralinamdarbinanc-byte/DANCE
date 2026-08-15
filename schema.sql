@@ -27,9 +27,13 @@ CREATE TABLE IF NOT EXISTS crm_customers (
   total_bookings INTEGER DEFAULT 1,
   internal_notes TEXT,
   tags TEXT, -- JSON array string e.g. ["تانگو", "عجله‌ای"]
+  is_archived INTEGER DEFAULT 0, -- 0 = Active, 1 = Archived
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- CRM Migration for existing D1 database instances:
+-- ALTER TABLE crm_customers ADD COLUMN is_archived INTEGER DEFAULT 0;
 
 -- 3. CRM Customer Interactions Timeline
 CREATE TABLE IF NOT EXISTS crm_interactions (

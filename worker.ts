@@ -470,11 +470,18 @@ export default {
             )
             .run();
 
-          // Auto-Upsert into CRM Customers in D1
+          // Auto-Upsert into CRM Customers in D1 with unarchive & New status on new booking
           await env.DB.prepare(
-            `INSERT INTO crm_customers (id, phone, couple_name, dance_style, wedding_date, status, total_bookings, internal_notes, tags, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, 'New', 1, ?, ?, ?, ?)
-             ON CONFLICT(phone) DO UPDATE SET total_bookings = total_bookings + 1, updated_at = ?`
+            `INSERT INTO crm_customers (id, phone, couple_name, dance_style, wedding_date, status, total_bookings, internal_notes, tags, is_archived, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'New', 1, ?, ?, 0, ?, ?)
+             ON CONFLICT(phone) DO UPDATE SET 
+               total_bookings = total_bookings + 1,
+               status = 'New',
+               is_archived = 0,
+               couple_name = excluded.couple_name,
+               dance_style = excluded.dance_style,
+               wedding_date = excluded.wedding_date,
+               updated_at = ?`
           )
             .bind(
               `cust-${id}`,
@@ -495,7 +502,7 @@ export default {
             `INSERT INTO crm_interactions (id, customer_phone, type, note, author, created_at)
              VALUES (?, ?, 'meeting', ?, 'سیستم آنلاین', ?)`
           )
-            .bind(`log-${Date.now()}`, body.phone || '', `ثبت درخواست نوبت رقص (${body.danceStyle})`, createdAt)
+            .bind(`log-${Date.now()}`, body.phone || '', `ثبت درخواست نوبت رقص (${body.danceStyle}) - خروج خودکار از بایگانی و فعال‌سازی`, createdAt)
             .run();
         } else {
           // Memory fallback
@@ -512,6 +519,33 @@ export default {
             createdAt,
           };
           memoryStore.bookings.unshift(newBooking);
+
+          // Update or create memory customer
+          const existingCust = memoryStore.customers.get(body.phone || '');
+          if (existingCust) {
+            existingCust.totalBookings = (existingCust.totalBookings || 1) + 1;
+            existingCust.status = 'New';
+            existingCust.isArchived = false;
+            existingCust.coupleName = body.coupleName || existingCust.coupleName;
+            existingCust.danceStyle = body.danceStyle || existingCust.danceStyle;
+            existingCust.weddingDate = body.weddingDate || existingCust.weddingDate;
+            existingCust.updatedAt = createdAt;
+          } else {
+            memoryStore.customers.set(body.phone || '', {
+              id: `cust-${id}`,
+              phone: body.phone || '',
+              coupleName: body.coupleName || 'نامشخص',
+              danceStyle: body.danceStyle || 'رقص عروسی',
+              weddingDate: body.weddingDate || '',
+              status: 'New',
+              totalBookings: 1,
+              internalNotes: body.notes ? `یادداشت رزرو: ${body.notes}` : '',
+              tags: [body.danceStyle || 'رقص عروسی', 'مشتری جدید'],
+              isArchived: false,
+              createdAt,
+              updatedAt: createdAt,
+            });
+          }
         }
 
         return new Response(
@@ -627,7 +661,14 @@ export default {
         }
 
         if (env.DB) {
-          const results = await env.DB.prepare('SELECT * FROM crm_customers ORDER BY updated_at DESC').all();
+          const results = await env.DB.prepare(
+            `SELECT * FROM crm_customers 
+             ORDER BY 
+               is_archived ASC,
+               (CASE WHEN status = 'New' THEN 0 ELSE 1 END) ASC,
+               updated_at DESC,
+               created_at DESC`
+          ).all();
           const customers = (results.results || []).map((row: any) => ({
             id: row.id,
             phone: row.phone,
@@ -638,6 +679,7 @@ export default {
             totalBookings: row.total_bookings,
             internalNotes: row.internal_notes,
             tags: typeof row.tags === 'string' ? JSON.parse(row.tags || '[]') : row.tags || [],
+            isArchived: Boolean(row.is_archived),
             createdAt: row.created_at,
             updatedAt: row.updated_at,
           }));
@@ -646,7 +688,17 @@ export default {
           });
         }
 
-        return new Response(JSON.stringify(Array.from(memoryStore.customers.values())), {
+        const memList = Array.from(memoryStore.customers.values()).sort((a, b) => {
+          if (Boolean(a.isArchived) !== Boolean(b.isArchived)) {
+            return a.isArchived ? 1 : -1;
+          }
+          if ((a.status === 'New') !== (b.status === 'New')) {
+            return a.status === 'New' ? -1 : 1;
+          }
+          return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+        });
+
+        return new Response(JSON.stringify(memList), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }
@@ -661,23 +713,70 @@ export default {
           });
         }
         const phone = decodeURIComponent(crmCustomerMatch[1]);
-        const body = (await request.json()) as { internalNotes?: string; tags?: string[] };
+        const body = (await request.json()) as {
+          internalNotes?: string;
+          tags?: string[];
+          isArchived?: boolean;
+          status?: string;
+        };
+
+        const nowFa = new Date().toLocaleDateString('fa-IR') + ' ' + new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 
         if (env.DB) {
+          const existing = await env.DB.prepare('SELECT * FROM crm_customers WHERE phone = ?').bind(phone).first<any>();
+
+          const isArchivedVal = body.isArchived !== undefined ? (body.isArchived ? 1 : 0) : (existing?.is_archived ?? 0);
+          const newStatus = body.status || existing?.status || 'New';
+          const newNotes = body.internalNotes !== undefined ? body.internalNotes : (existing?.internal_notes || '');
+          const newTags = body.tags !== undefined ? JSON.stringify(body.tags) : (existing?.tags || '[]');
+
           await env.DB.prepare(
-            'UPDATE crm_customers SET internal_notes = ?, tags = ?, updated_at = CURRENT_TIMESTAMP WHERE phone = ?'
+            `UPDATE crm_customers SET 
+               internal_notes = ?, 
+               tags = ?, 
+               is_archived = ?, 
+               status = ?, 
+               updated_at = ? 
+             WHERE phone = ?`
           )
-            .bind(body.internalNotes || '', JSON.stringify(body.tags || []), phone)
+            .bind(newNotes, newTags, isArchivedVal, newStatus, nowFa, phone)
             .run();
+
+          // Log interaction if archive state changed
+          if (existing && body.isArchived !== undefined && Boolean(existing.is_archived) !== Boolean(body.isArchived)) {
+            const logNote = body.isArchived
+              ? 'پرونده مشتری به بایگانی منتقل شد'
+              : 'پرونده مشتری از بایگانی بازگردانده و فعال شد';
+            await env.DB.prepare(
+              'INSERT INTO crm_interactions (id, customer_phone, type, note, author, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+            )
+              .bind(`log-${Date.now()}`, phone, 'status_change', logNote, 'مدیریت آکادمی', nowFa)
+              .run();
+          }
         } else {
           const cust = memoryStore.customers.get(phone);
           if (cust) {
-            cust.internalNotes = body.internalNotes;
-            cust.tags = body.tags;
+            const oldArchived = cust.isArchived;
+            if (body.internalNotes !== undefined) cust.internalNotes = body.internalNotes;
+            if (body.tags !== undefined) cust.tags = body.tags;
+            if (body.isArchived !== undefined) cust.isArchived = body.isArchived;
+            if (body.status !== undefined) cust.status = body.status;
+            cust.updatedAt = nowFa;
+
+            if (body.isArchived !== undefined && Boolean(oldArchived) !== Boolean(body.isArchived)) {
+              memoryStore.interactions.unshift({
+                id: `log-${Date.now()}`,
+                customerPhone: phone,
+                type: 'status_change',
+                note: body.isArchived ? 'پرونده مشتری به بایگانی منتقل شد' : 'پرونده مشتری از بایگانی بازگردانده و فعال شد',
+                author: 'مدیریت آکادمی',
+                createdAt: nowFa,
+              });
+            }
           }
         }
 
-        return new Response(JSON.stringify({ success: true, phone }), {
+        return new Response(JSON.stringify({ success: true, phone, isArchived: body.isArchived }), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }

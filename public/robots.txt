@@ -1,5 +1,6 @@
 User-agent: *
-Allow: /
 Disallow: /admin
+Disallow: /admin/
+Allow: /
 
-Sitemap: https://dance-academy.example.com/sitemap.xml
+Sitemap: https://adadance.ir/sitemap.xml

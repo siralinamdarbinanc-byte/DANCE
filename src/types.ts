@@ -335,6 +335,7 @@ export interface CrmCustomer {
   totalBookings: number;
   internalNotes: string;
   tags: string[];
+  isArchived?: boolean;
   createdAt: string;
   updatedAt: string;
 }

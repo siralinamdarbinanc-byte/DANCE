@@ -61,6 +61,30 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
   useModalBackHandler(mobileMenuOpen, () => setMobileMenuOpen(false), 'adminMobileMenu');
   useModalBackHandler(showResetModal, () => setShowResetModal(false), 'adminResetModal');
 
+  // Prevent search engines from indexing the Admin panel while keeping public pages indexable
+  useEffect(() => {
+    let robotsMeta = document.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    const created = !robotsMeta;
+    const previousContent = robotsMeta ? robotsMeta.getAttribute('content') : null;
+
+    if (!robotsMeta) {
+      robotsMeta = document.createElement('meta');
+      robotsMeta.setAttribute('name', 'robots');
+      document.head.appendChild(robotsMeta);
+    }
+    robotsMeta.setAttribute('content', 'noindex, nofollow, noarchive');
+
+    return () => {
+      if (created && robotsMeta && robotsMeta.parentNode) {
+        robotsMeta.parentNode.removeChild(robotsMeta);
+      } else if (robotsMeta && previousContent !== null) {
+        robotsMeta.setAttribute('content', previousContent);
+      } else if (robotsMeta && robotsMeta.parentNode) {
+        robotsMeta.parentNode.removeChild(robotsMeta);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const verifySession = async () => {
       const token = localStorage.getItem('admin_auth_token');

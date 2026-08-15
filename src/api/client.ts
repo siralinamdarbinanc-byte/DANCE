@@ -143,17 +143,28 @@ export const api = {
     return [];
   },
 
-  async updateCustomerNotes(phone: string, notes?: string, tags?: string[]): Promise<boolean> {
+  async updateCustomer(
+    phone: string,
+    data: { internalNotes?: string; tags?: string[]; isArchived?: boolean; status?: BookingStatus }
+  ): Promise<boolean> {
     try {
       const res = await fetch(`${API_BASE}/crm/customers/${encodeURIComponent(phone)}`, {
         method: 'PUT',
         headers: getHeaders(),
-        body: JSON.stringify({ internalNotes: notes, tags }),
+        body: JSON.stringify(data),
       });
       return res.ok;
     } catch (e) {
       return false;
     }
+  },
+
+  async updateCustomerNotes(phone: string, notes?: string, tags?: string[]): Promise<boolean> {
+    return this.updateCustomer(phone, { internalNotes: notes, tags });
+  },
+
+  async setCustomerArchiveStatus(phone: string, isArchived: boolean): Promise<boolean> {
+    return this.updateCustomer(phone, { isArchived });
   },
 
   async fetchInteractions(phone: string): Promise<CrmInteraction[]> {

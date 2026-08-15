@@ -123,6 +123,9 @@ app.post('/api/bookings', (req: Request, res: Response) => {
     customer.coupleName = coupleName || customer.coupleName;
     customer.danceStyle = danceStyle || customer.danceStyle;
     customer.weddingDate = weddingDate || customer.weddingDate;
+    customer.totalBookings += 1;
+    customer.status = 'New';
+    customer.isArchived = false;
     customer.updatedAt = createdAt;
   } else {
     customer = {
@@ -135,6 +138,7 @@ app.post('/api/bookings', (req: Request, res: Response) => {
       totalBookings: 1,
       internalNotes: notes ? `یادداشت اولیه رزرو: ${notes}` : '',
       tags: [danceStyle || 'رقص عروسی', 'مشتری جدید'],
+      isArchived: false,
       createdAt,
       updatedAt: createdAt,
     };
@@ -146,7 +150,7 @@ app.post('/api/bookings', (req: Request, res: Response) => {
     id: `log-${Date.now()}`,
     customerPhone: phone,
     type: 'meeting',
-    note: `ثبت درخواست مشاوره جدید (${danceStyle})`,
+    note: `ثبت درخواست مشاوره جدید (${danceStyle}) - خروج از بایگانی و فعال‌سازی`,
     author: 'سیستم رزرو آنلاین',
     createdAt,
   });
@@ -195,13 +199,22 @@ app.delete('/api/bookings/:id', verifyAdminAuth, (req: Request, res: Response) =
 // 3. CRM CUSTOMERS & INTERACTIONS ENDPOINTS
 // -------------------------------------------------------------
 app.get('/api/crm/customers', verifyAdminAuth, (req: Request, res: Response) => {
-  const customersList = Array.from(customersStore.values());
+  const customersList = Array.from(customersStore.values()).sort((a, b) => {
+    if (Boolean(a.isArchived) !== Boolean(b.isArchived)) {
+      return a.isArchived ? 1 : -1;
+    }
+    if ((a.status === 'New') !== (b.status === 'New')) {
+      return a.status === 'New' ? -1 : 1;
+    }
+    return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+  });
   res.json(customersList);
 });
 
 app.put('/api/crm/customers/:phone', verifyAdminAuth, (req: Request, res: Response) => {
   const { phone } = req.params;
-  const { internalNotes, tags } = req.body;
+  const { internalNotes, tags, isArchived, status } = req.body;
+  const nowFa = new Date().toLocaleDateString('fa-IR') + ' ' + new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 
   let customer = customersStore.get(phone);
   if (!customer) {
@@ -211,18 +224,33 @@ app.put('/api/crm/customers/:phone', verifyAdminAuth, (req: Request, res: Respon
       coupleName: 'هنرجو',
       danceStyle: 'رقص عروسی',
       weddingDate: '',
-      status: 'New',
+      status: status || 'New',
       totalBookings: 1,
       internalNotes: internalNotes || '',
       tags: tags || [],
-      createdAt: new Date().toLocaleDateString('fa-IR'),
-      updatedAt: new Date().toLocaleDateString('fa-IR'),
+      isArchived: Boolean(isArchived),
+      createdAt: nowFa,
+      updatedAt: nowFa,
     };
     customersStore.set(phone, customer);
   } else {
+    const oldArchived = customer.isArchived;
     if (internalNotes !== undefined) customer.internalNotes = internalNotes;
     if (tags !== undefined) customer.tags = tags;
-    customer.updatedAt = new Date().toLocaleDateString('fa-IR');
+    if (isArchived !== undefined) customer.isArchived = Boolean(isArchived);
+    if (status !== undefined) customer.status = status;
+    customer.updatedAt = nowFa;
+
+    if (isArchived !== undefined && Boolean(oldArchived) !== Boolean(isArchived)) {
+      interactionsStore.unshift({
+        id: `log-${Date.now()}`,
+        customerPhone: phone,
+        type: 'status_change',
+        note: isArchived ? 'پرونده مشتری به بایگانی منتقل شد' : 'پرونده مشتری از بایگانی بازگردانده و فعال شد',
+        author: 'مدیریت آکادمی',
+        createdAt: nowFa,
+      });
+    }
   }
 
   res.json({ success: true, customer });

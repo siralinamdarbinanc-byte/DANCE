@@ -19,8 +19,13 @@ import {
   Send,
   Sparkles,
   Users,
-  ShieldCheck,
+  Archive,
+  ArchiveRestore,
+  RotateCcw,
+  FolderArchive,
+  Check,
   Flame,
+  ShieldAlert,
 } from 'lucide-react';
 import { useModalBackHandler } from '../../hooks/useModalBackHandler';
 import { api } from '../../api/client';
@@ -33,6 +38,7 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
   const { content, updateBookingStatus, deleteBooking } = useContent();
   const [viewMode, setViewMode] = useState<'bookings' | 'crm'>('bookings');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [crmLifecycleFilter, setCrmLifecycleFilter] = useState<'ALL' | 'NEW' | 'ACTIVE' | 'ARCHIVED'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -44,44 +50,46 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
   const [newNoteType, setNewNoteType] = useState<CrmInteraction['type']>('note');
   const [internalNotesEdit, setInternalNotesEdit] = useState<string>('');
   const [tagInput, setTagInput] = useState<string>('');
+  const [isSavingNotes, setIsSavingNotes] = useState<boolean>(false);
 
   useModalBackHandler(!!deleteId, () => setDeleteId(null), 'bookingDeleteModal');
   useModalBackHandler(!!selectedCustomer, () => setSelectedCustomer(null), 'crmCustomerModal');
 
   // Load CRM Customers
-  useEffect(() => {
-    const loadCrm = async () => {
-      const apiCusts = await api.fetchCrmCustomers();
-      if (apiCusts && apiCusts.length > 0) {
-        setCustomers(apiCusts);
-      } else {
-        // Derive from current bookings in content
-        const derivedMap = new Map<string, CrmCustomer>();
-        (content.bookings || []).forEach((b) => {
-          if (!derivedMap.has(b.phone)) {
-            derivedMap.set(b.phone, {
-              id: `cust-${b.id}`,
-              phone: b.phone,
-              coupleName: b.coupleName,
-              danceStyle: b.danceStyle,
-              weddingDate: b.weddingDate || 'ثبت نشده',
-              status: b.status,
-              totalBookings: 1,
-              internalNotes: b.notes ? `یادداشت اولیه: ${b.notes}` : '',
-              tags: [b.danceStyle || 'رقص عروسی', 'مشتری جدید'],
-              createdAt: b.createdAt,
-              updatedAt: b.createdAt,
-            });
-          } else {
-            const existing = derivedMap.get(b.phone)!;
-            existing.totalBookings += 1;
-          }
-        });
-        setCustomers(Array.from(derivedMap.values()));
-      }
-    };
+  const loadCrmData = async () => {
+    const apiCusts = await api.fetchCrmCustomers();
+    if (apiCusts && apiCusts.length > 0) {
+      setCustomers(apiCusts);
+    } else {
+      // Derive from current bookings in content
+      const derivedMap = new Map<string, CrmCustomer>();
+      (content.bookings || []).forEach((b) => {
+        if (!derivedMap.has(b.phone)) {
+          derivedMap.set(b.phone, {
+            id: `cust-${b.id}`,
+            phone: b.phone,
+            coupleName: b.coupleName,
+            danceStyle: b.danceStyle,
+            weddingDate: b.weddingDate || 'ثبت نشده',
+            status: b.status,
+            totalBookings: 1,
+            internalNotes: b.notes ? `یادداشت اولیه: ${b.notes}` : '',
+            tags: [b.danceStyle || 'رقص عروسی', 'مشتری جدید'],
+            isArchived: false,
+            createdAt: b.createdAt,
+            updatedAt: b.createdAt,
+          });
+        } else {
+          const existing = derivedMap.get(b.phone)!;
+          existing.totalBookings += 1;
+        }
+      });
+      setCustomers(Array.from(derivedMap.values()));
+    }
+  };
 
-    loadCrm();
+  useEffect(() => {
+    loadCrmData();
   }, [content.bookings]);
 
   // Load interactions when a customer is opened
@@ -106,6 +114,29 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
     }
   };
 
+  // Archive or Restore Customer
+  const handleArchiveToggle = async (customer: CrmCustomer, newArchivedState: boolean, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const success = await api.setCustomerArchiveStatus(customer.phone, newArchivedState);
+    if (success) {
+      setCustomers((prev) =>
+        prev.map((c) => (c.phone === customer.phone ? { ...c, isArchived: newArchivedState } : c))
+      );
+      if (selectedCustomer && selectedCustomer.phone === customer.phone) {
+        setSelectedCustomer((prev) => (prev ? { ...prev, isArchived: newArchivedState } : null));
+        const logs = await api.fetchInteractions(customer.phone);
+        if (logs) setCustomerInteractions(logs);
+      }
+      if (newArchivedState) {
+        onNotify(`پرونده «${customer.coupleName}» به بایگانی منتقل شد.`);
+      } else {
+        onNotify(`پرونده «${customer.coupleName}» از بایگانی بازگردانده و فعال شد.`);
+      }
+    } else {
+      onNotify('خطا در تغییر وضعیت بایگانی مشتری.');
+    }
+  };
+
   const handleAddInteraction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCustomer || !newNote.trim()) return;
@@ -117,7 +148,10 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
       type: newNoteType,
       note: newNote.trim(),
       author: 'مدیریت آکادمی',
-      createdAt: new Date().toLocaleDateString('fa-IR') + ' ' + new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
+      createdAt:
+        new Date().toLocaleDateString('fa-IR') +
+        ' ' +
+        new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     };
 
     setCustomerInteractions((prev) => [newLog, ...prev]);
@@ -127,12 +161,22 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
 
   const handleSaveInternalNotes = async () => {
     if (!selectedCustomer) return;
-    await api.updateCustomerNotes(selectedCustomer.phone, internalNotesEdit, selectedCustomer.tags);
-    setCustomers((prev) =>
-      prev.map((c) => (c.phone === selectedCustomer.phone ? { ...c, internalNotes: internalNotesEdit } : c))
+    setIsSavingNotes(true);
+    const success = await api.updateCustomerNotes(
+      selectedCustomer.phone,
+      internalNotesEdit,
+      selectedCustomer.tags
     );
-    setSelectedCustomer((prev) => (prev ? { ...prev, internalNotes: internalNotesEdit } : null));
-    onNotify('یادداشت‌های پرونده ذخیره شد');
+    setIsSavingNotes(false);
+    if (success) {
+      setCustomers((prev) =>
+        prev.map((c) => (c.phone === selectedCustomer.phone ? { ...c, internalNotes: internalNotesEdit } : c))
+      );
+      setSelectedCustomer((prev) => (prev ? { ...prev, internalNotes: internalNotesEdit } : null));
+      onNotify('یادداشت‌های پرونده با موفقیت ذخیره شد');
+    } else {
+      onNotify('خطا در ذخیره یادداشت پرونده');
+    }
   };
 
   const handleAddTag = () => {
@@ -144,6 +188,7 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
     );
     api.updateCustomerNotes(selectedCustomer.phone, selectedCustomer.internalNotes, updatedTags);
     setTagInput('');
+    onNotify(`برچسب «${tagInput.trim()}» اضافه شد`);
   };
 
   const statusBadges: Record<BookingStatus, { label: string; color: string }> = {
@@ -163,13 +208,41 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
     return matchesStatus && matchesSearch;
   });
 
-  const filteredCustomers = customers.filter((c) => {
-    const matchesStatus = filterStatus === 'ALL' || c.status === filterStatus;
+  // Sort and Filter Customers
+  const sortedCustomers = [...customers].sort((a, b) => {
+    const aArchived = Boolean(a.isArchived);
+    const bArchived = Boolean(b.isArchived);
+    if (aArchived !== bArchived) return aArchived ? 1 : -1;
+
+    const aIsNew = a.status === 'New';
+    const bIsNew = b.status === 'New';
+    if (aIsNew !== bIsNew) return aIsNew ? -1 : 1;
+
+    return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
+  });
+
+  const countNewCustomers = customers.filter((c) => c.status === 'New' && !c.isArchived).length;
+  const countActiveCustomers = customers.filter((c) => !c.isArchived).length;
+  const countArchivedCustomers = customers.filter((c) => Boolean(c.isArchived)).length;
+
+  const filteredCustomers = sortedCustomers.filter((c) => {
+    const isNew = c.status === 'New' && !c.isArchived;
+    const isActive = !c.isArchived;
+    const isArchived = Boolean(c.isArchived);
+
+    let matchesLifecycle = true;
+    if (crmLifecycleFilter === 'NEW') matchesLifecycle = isNew;
+    else if (crmLifecycleFilter === 'ACTIVE') matchesLifecycle = isActive;
+    else if (crmLifecycleFilter === 'ARCHIVED') matchesLifecycle = isArchived;
+
     const matchesSearch =
       c.coupleName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.phone.includes(searchQuery) ||
-      c.danceStyle.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesStatus && matchesSearch;
+      (c.danceStyle && c.danceStyle.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (c.internalNotes && c.internalNotes.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (c.tags && c.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase())));
+
+    return matchesLifecycle && matchesSearch;
   });
 
   const handleStatusChange = (id: string, newStatus: BookingStatus) => {
@@ -177,28 +250,25 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
     onNotify(`وضعیت درخواست به «${statusBadges[newStatus].label}» تغییر یافت`);
   };
 
-  const handleDelete = () => {
+  const handleDeleteBooking = () => {
     if (deleteId) {
       deleteBooking(deleteId);
       setDeleteId(null);
-      onNotify('درخواست رزرو با موفقیت حذف شد');
+      onNotify('درخواست رزرو حذف شد');
     }
   };
 
   return (
-    <div className="space-y-8 text-right">
+    <div className="space-y-6 text-right" dir="rtl">
       {/* Header & Tabs */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#e9c349]/20 pb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#e9c349]/20 pb-4">
         <div>
-          <div className="flex items-center gap-2 text-[#e9c349] text-xs font-semibold mb-1">
-            <ShieldCheck className="w-4 h-4" />
-            <span>سامانه یکپارچه مدیریت ارتباط با مشتریان (CRM) و رزروها</span>
-          </div>
-          <h2 className="text-xl font-bold text-[#e2e3e0] font-display">
-            مدیریت مشتریان و نوبت‌های رقص
+          <h2 className="text-xl font-bold text-[#e2e3e0] font-display flex items-center gap-2">
+            <Users className="w-5 h-5 text-[#e9c349]" />
+            <span>مدیریت رزروها و CRM اختصاصی آکادمی</span>
           </h2>
-          <p className="text-xs text-[#c0c8c4]">
-            پیگیری پرونده زوج‌ها، تاریخچه تماس‌ها، وضعیت رزرو و یادداشت‌های اختصاصی هر هنرجو
+          <p className="text-xs text-[#c0c8c4] mt-1">
+            پیگیری پرونده زوج‌ها، تاریخچه تماس‌ها، وضعیت رزرو و بایگانی هوشمند
           </p>
         </div>
 
@@ -213,7 +283,7 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
             }`}
           >
             <Calendar className="w-4 h-4 text-[#e9c349]" />
-            <span>لیست درخواست‌های رزرو ({(content.bookings || []).length})</span>
+            <span>درخواست‌های رزرو ({(content.bookings || []).length})</span>
           </button>
 
           <button
@@ -226,40 +296,99 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
           >
             <Users className="w-4 h-4 text-[#e9c349]" />
             <span>پرونده مشتریان CRM ({customers.length})</span>
+            {countNewCustomers > 0 && (
+              <span className="w-2 h-2 rounded-full bg-[#e9c349] animate-pulse" />
+            )}
           </button>
         </div>
       </div>
 
       {/* Filters & Search */}
       <div className="bg-[#181a19] border border-[#e9c349]/20 rounded-2xl p-4 flex flex-col md:flex-row gap-4 justify-between items-center">
-        <div className="relative w-full md:w-72">
+        <div className="relative w-full md:w-80">
           <Search className="absolute right-3 top-2.5 w-4 h-4 text-[#e9c349]" />
           <input
             type="text"
-            placeholder="جستجوی نام زوج، تلفن یا سبک..."
+            placeholder="جستجوی نام زوج، شماره تماس، سبک یا برچسب..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pr-10 pl-3 py-2 bg-[#111413] border border-[#e9c349]/20 rounded-xl text-xs text-[#e2e3e0] focus:outline-none"
+            className="w-full pr-10 pl-3 py-2 bg-[#111413] border border-[#e9c349]/20 rounded-xl text-xs text-[#e2e3e0] focus:outline-none focus:border-[#e9c349]"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          <Filter className="w-4 h-4 text-[#e9c349] shrink-0" />
-          <span className="text-xs text-[#c0c8c4]">فیلتر وضعیت:</span>
-          {['ALL', 'New', 'Contacted', 'Confirmed', 'Completed', 'Cancelled'].map((st) => (
+        {/* CRM LIFECYCLE FILTERS */}
+        {viewMode === 'crm' ? (
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <Filter className="w-4 h-4 text-[#e9c349] shrink-0" />
+            <span className="text-xs text-[#c0c8c4]">فیلتر وضعیت:</span>
+            
             <button
-              key={st}
-              onClick={() => setFilterStatus(st)}
+              onClick={() => setCrmLifecycleFilter('ALL')}
               className={`px-3 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-all ${
-                filterStatus === st
-                  ? 'bg-[#e9c349] text-[#3c2f00] font-bold'
+                crmLifecycleFilter === 'ALL'
+                  ? 'bg-[#e9c349] text-[#111413] font-bold shadow-md shadow-[#e9c349]/20'
                   : 'bg-[#111413] text-[#c0c8c4] hover:bg-white/5 border border-[#e9c349]/10'
               }`}
             >
-              {st === 'ALL' ? 'همه' : statusBadges[st as BookingStatus].label}
+              همه ({customers.length})
             </button>
-          ))}
-        </div>
+
+            <button
+              onClick={() => setCrmLifecycleFilter('NEW')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-all flex items-center gap-1.5 ${
+                crmLifecycleFilter === 'NEW'
+                  ? 'bg-[#063b2f] text-[#e9c349] border border-[#e9c349] font-bold shadow-md'
+                  : 'bg-[#111413] text-[#e9c349] hover:bg-white/5 border border-[#e9c349]/30'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>مشتریان جدید ({countNewCustomers})</span>
+            </button>
+
+            <button
+              onClick={() => setCrmLifecycleFilter('ACTIVE')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-all flex items-center gap-1.5 ${
+                crmLifecycleFilter === 'ACTIVE'
+                  ? 'bg-[#063b2f] text-[#a0d1c0] border border-[#e9c349]/60 font-bold'
+                  : 'bg-[#111413] text-[#c0c8c4] hover:bg-white/5 border border-[#e9c349]/10'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>فعال ({countActiveCustomers})</span>
+            </button>
+
+            <button
+              onClick={() => setCrmLifecycleFilter('ARCHIVED')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-all flex items-center gap-1.5 ${
+                crmLifecycleFilter === 'ARCHIVED'
+                  ? 'bg-neutral-800 text-amber-200 border border-neutral-600 font-bold'
+                  : 'bg-[#111413] text-[#c0c8c4] hover:bg-white/5 border border-[#e9c349]/10'
+              }`}
+            >
+              <FolderArchive className="w-3.5 h-3.5 text-neutral-400" />
+              <span>بایگانی‌شده ({countArchivedCustomers})</span>
+            </button>
+          </div>
+        ) : (
+          /* BOOKINGS STATUS FILTERS */
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <Filter className="w-4 h-4 text-[#e9c349] shrink-0" />
+            <span className="text-xs text-[#c0c8c4]">فیلتر وضعیت رزرو:</span>
+            {['ALL', 'New', 'Contacted', 'Confirmed', 'Completed', 'Cancelled'].map((st) => (
+              <button
+                key={st}
+                onClick={() => setFilterStatus(st)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-all ${
+                  filterStatus === st
+                    ? 'bg-[#e9c349] text-[#111413] font-bold'
+                    : 'bg-[#111413] text-[#c0c8c4] hover:bg-white/5 border border-[#e9c349]/10'
+                }`}
+              >
+                {st === 'ALL' ? 'همه' : statusBadges[st as BookingStatus].label.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* VIEW 1: BOOKINGS LIST */}
@@ -371,6 +500,7 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
                           totalBookings: 1,
                           internalNotes: b.notes || '',
                           tags: [b.danceStyle],
+                          isArchived: false,
                           createdAt: b.createdAt,
                           updatedAt: b.createdAt,
                         };
@@ -385,6 +515,7 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
                     <button
                       onClick={() => setDeleteId(b.id)}
                       className="p-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-red-300 rounded-xl cursor-pointer text-xs flex items-center gap-1"
+                      title="حذف رزرو"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -398,62 +529,153 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
 
       {/* VIEW 2: CRM CUSTOMERS GRID */}
       {viewMode === 'crm' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCustomers.map((cust) => (
-            <div
-              key={cust.phone}
-              onClick={() => handleOpenCustomer(cust)}
-              className="bg-[#181a19] border border-[#e9c349]/20 hover:border-[#e9c349]/50 rounded-2xl p-5 space-y-4 cursor-pointer transition-all group flex flex-col justify-between"
-            >
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-[#063b2f] border border-[#e9c349]/40 flex items-center justify-center text-[#e9c349]">
-                      <User className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-[#e2e3e0] group-hover:text-[#e9c349] transition-colors">
-                        {cust.coupleName}
-                      </h4>
-                      <span className="text-[11px] text-[#c0c8c4] font-mono">{cust.phone}</span>
-                    </div>
-                  </div>
-
-                  <span className={`text-[10px] px-2.5 py-0.5 rounded-full border ${statusBadges[cust.status].color}`}>
-                    {statusBadges[cust.status].label.split(' ')[0]}
-                  </span>
-                </div>
-
-                <div className="space-y-1.5 text-xs text-[#c0c8c4] bg-[#111413] p-3 rounded-xl border border-[#e9c349]/10">
-                  <div className="flex items-center justify-between">
-                    <span>سبک انتخابی:</span>
-                    <span className="text-[#e2e3e0] font-bold">{cust.danceStyle}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>تاریخ عروسی:</span>
-                    <span className="text-[#e2e3e0]">{cust.weddingDate}</span>
-                  </div>
-                </div>
-
-                {/* Tags */}
-                <div className="flex flex-wrap gap-1">
-                  {(cust.tags || []).map((t, idx) => (
-                    <span
-                      key={idx}
-                      className="text-[10px] bg-[#063b2f]/60 text-[#a0d1c0] border border-[#e9c349]/20 px-2 py-0.5 rounded-md"
-                    >
-                      #{t}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-[#e9c349]/10 flex items-center justify-between text-xs text-[#e9c349] font-bold">
-                <span>باز کردن پرونده کامل و تاریخچه</span>
-                <Sparkles className="w-3.5 h-3.5" />
-              </div>
+        <div className="space-y-4">
+          {filteredCustomers.length === 0 ? (
+            <div className="bg-[#181a19] border border-[#e9c349]/20 rounded-2xl p-12 text-center text-[#c0c8c4] space-y-2">
+              <FolderArchive className="w-8 h-8 text-[#e9c349] mx-auto opacity-60" />
+              <p className="text-sm">هیچ پرونده‌ای با فیلتر یا جستجوی انتخابی یافت نشد.</p>
             </div>
-          ))}
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredCustomers.map((cust) => {
+                const isNew = cust.status === 'New' && !cust.isArchived;
+                const isArchived = Boolean(cust.isArchived);
+
+                return (
+                  <div
+                    key={cust.phone}
+                    onClick={() => handleOpenCustomer(cust)}
+                    className={`rounded-2xl p-5 space-y-4 cursor-pointer transition-all group flex flex-col justify-between relative ${
+                      isArchived
+                        ? 'bg-[#141615] border border-white/10 opacity-75 hover:opacity-100 hover:border-neutral-500'
+                        : isNew
+                        ? 'bg-gradient-to-b from-[#1b221d] to-[#181a19] border-2 border-[#e9c349]/60 shadow-lg shadow-[#e9c349]/5 hover:border-[#e9c349]'
+                        : 'bg-[#181a19] border border-[#e9c349]/20 hover:border-[#e9c349]/50'
+                    }`}
+                  >
+                    {/* Top Status & Name */}
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                              isArchived
+                                ? 'bg-neutral-800 border border-neutral-700 text-neutral-400'
+                                : isNew
+                                ? 'bg-[#063b2f] border-2 border-[#e9c349] text-[#e9c349] shadow-sm shadow-[#e9c349]/30'
+                                : 'bg-[#063b2f] border border-[#e9c349]/40 text-[#e9c349]'
+                            }`}
+                          >
+                            <User className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-[#e2e3e0] group-hover:text-[#e9c349] transition-colors">
+                                {cust.coupleName}
+                              </h4>
+                            </div>
+                            <span className="text-[11px] text-[#c0c8c4] font-mono block mt-0.5">
+                              {cust.phone}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Status Badges */}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          {isArchived ? (
+                            <span className="text-[10px] px-2.5 py-0.5 rounded-full border bg-neutral-800 text-neutral-300 border-neutral-700 flex items-center gap-1 font-semibold">
+                              <FolderArchive className="w-3 h-3 text-neutral-400" />
+                              <span>بایگانی‌شده</span>
+                            </span>
+                          ) : isNew ? (
+                            <span className="text-[10px] px-2.5 py-0.5 rounded-full border bg-[#063b2f] text-[#e9c349] border-[#e9c349] flex items-center gap-1 font-bold shadow-sm shadow-[#e9c349]/30">
+                              <Sparkles className="w-3 h-3 text-[#e9c349]" />
+                              <span>مشتری جدید</span>
+                            </span>
+                          ) : (
+                            <span
+                              className={`text-[10px] px-2.5 py-0.5 rounded-full border ${
+                                statusBadges[cust.status]?.color || 'bg-emerald-500/20 text-emerald-300'
+                              }`}
+                            >
+                              {statusBadges[cust.status]?.label.split(' ')[0] || 'فعال'}
+                            </span>
+                          )}
+
+                          {cust.totalBookings > 1 && (
+                            <span className="text-[9px] text-[#a0d1c0] bg-[#063b2f]/40 px-1.5 py-0.5 rounded">
+                              {cust.totalBookings} درخواست رزرو
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Brief Info Block */}
+                      <div className="space-y-1.5 text-xs text-[#c0c8c4] bg-[#111413] p-3 rounded-xl border border-[#e9c349]/10">
+                        <div className="flex items-center justify-between">
+                          <span>سبک درخواستی:</span>
+                          <span className="text-[#e2e3e0] font-bold">{cust.danceStyle || 'رقص عروسی'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>تاریخ عروسی:</span>
+                          <span className="text-[#e2e3e0]">{cust.weddingDate || 'ثبت نشده'}</span>
+                        </div>
+                        {cust.internalNotes && (
+                          <div className="pt-1.5 border-t border-white/5 text-[11px] text-[#e2e3e0]/80 line-clamp-1">
+                            <span className="text-[#e9c349]/80 font-medium">یادداشت: </span>
+                            {cust.internalNotes}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Tags */}
+                      <div className="flex flex-wrap gap-1">
+                        {(cust.tags || []).map((t, idx) => (
+                          <span
+                            key={idx}
+                            className="text-[10px] bg-[#063b2f]/60 text-[#a0d1c0] border border-[#e9c349]/20 px-2 py-0.5 rounded-md"
+                          >
+                            #{t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bottom Actions */}
+                    <div className="pt-3 border-t border-[#e9c349]/10 flex items-center justify-between gap-2 text-xs">
+                      {/* Archive / Restore Button */}
+                      {isArchived ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleArchiveToggle(cust, false, e)}
+                          className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 rounded-lg text-[11px] flex items-center gap-1 cursor-pointer transition-colors font-medium"
+                          title="بازگردانی به لیست مشتریان فعال"
+                        >
+                          <ArchiveRestore className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>بازگردانی</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => handleArchiveToggle(cust, true, e)}
+                          className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-neutral-200 rounded-lg text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+                          title="انتقال به بایگانی"
+                        >
+                          <Archive className="w-3.5 h-3.5" />
+                          <span>بایگانی</span>
+                        </button>
+                      )}
+
+                      <div className="flex items-center gap-1 text-[#e9c349] font-bold text-xs group-hover:translate-x-[-2px] transition-transform">
+                        <span>مشاهده پرونده</span>
+                        <Sparkles className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -469,55 +691,124 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[#e9c349]/20 pb-4">
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-[#063b2f] border border-[#e9c349]/40 rounded-2xl text-[#e9c349]">
+                <div
+                  className={`p-3 rounded-2xl ${
+                    selectedCustomer.isArchived
+                      ? 'bg-neutral-800 border border-neutral-700 text-neutral-300'
+                      : selectedCustomer.status === 'New'
+                      ? 'bg-[#063b2f] border-2 border-[#e9c349] text-[#e9c349]'
+                      : 'bg-[#063b2f] border border-[#e9c349]/40 text-[#e9c349]'
+                  }`}
+                >
                   <User className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-[#e2e3e0] font-display">
-                    پرونده مشتری: {selectedCustomer.coupleName}
-                  </h3>
-                  <div className="flex items-center gap-3 text-xs text-[#c0c8c4] mt-0.5">
-                    <span className="font-mono text-[#e9c349]">{selectedCustomer.phone}</span>
-                    <span>• سبک: {selectedCustomer.danceStyle}</span>
-                    <span>• تاریخ عروسی: {selectedCustomer.weddingDate}</span>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-[#e2e3e0] font-display">
+                      پرونده هنرجو: {selectedCustomer.coupleName}
+                    </h3>
+                    {selectedCustomer.isArchived ? (
+                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-300 border border-neutral-700 font-bold">
+                        بایگانی‌شده
+                      </span>
+                    ) : selectedCustomer.status === 'New' ? (
+                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-[#063b2f] text-[#e9c349] border border-[#e9c349] font-bold">
+                        مشتری جدید
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+                        فعال
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-[#c0c8c4] mt-1">
+                    <span className="font-mono text-[#e9c349]" dir="ltr">
+                      {selectedCustomer.phone}
+                    </span>
+                    <span>• سبک: {selectedCustomer.danceStyle || 'رقص عروسی'}</span>
+                    <span>• تاریخ عروسی: {selectedCustomer.weddingDate || 'ثبت نشده'}</span>
+                    <span>• تعداد رزرو: {selectedCustomer.totalBookings}</span>
                   </div>
                 </div>
               </div>
 
               <button
                 onClick={() => setSelectedCustomer(null)}
-                className="px-3 py-1.5 bg-[#111413] hover:bg-white/5 border border-white/10 text-[#c0c8c4] rounded-full text-xs font-bold"
+                className="px-3.5 py-1.5 bg-[#111413] hover:bg-white/5 border border-white/10 text-[#c0c8c4] rounded-full text-xs font-bold cursor-pointer"
               >
                 بستن
               </button>
             </div>
 
-            {/* Quick Actions Bar */}
-            <div className="flex flex-wrap items-center gap-3 bg-[#111413] p-3 rounded-2xl border border-[#e9c349]/20">
-              <a
-                href={`https://wa.me/98${selectedCustomer.phone.replace(/^0/, '')}`}
-                target="_blank"
-                rel="noreferrer"
-                className="bg-[#063b2f] text-[#a0d1c0] border border-[#e9c349]/30 text-xs px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-[#084b3c]"
-              >
-                <Phone className="w-4 h-4 text-[#e9c349]" />
-                <span>پیام در واتس‌اپ</span>
-              </a>
+            {/* Banner if Archived */}
+            {selectedCustomer.isArchived && (
+              <div className="bg-neutral-900/90 border border-neutral-700 p-3 rounded-2xl text-xs text-neutral-300 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <FolderArchive className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    این پرونده در وضعیت <strong>بایگانی</strong> قرار دارد. تمام تاریخچه و یادداشت‌ها محفوظ است.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleArchiveToggle(selectedCustomer, false)}
+                  className="px-3 py-1 bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-500/40 text-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                >
+                  <ArchiveRestore className="w-3.5 h-3.5" />
+                  <span>بازگردانی به لیست فعال</span>
+                </button>
+              </div>
+            )}
 
-              <a
-                href={`tel:${selectedCustomer.phone}`}
-                className="bg-[#181a19] text-[#e2e3e0] border border-white/10 text-xs px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-white/5"
-              >
-                <Phone className="w-4 h-4 text-[#e9c349]" />
-                <span>تماس مستقیم</span>
-              </a>
+            {/* Quick Actions Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#111413] p-3 rounded-2xl border border-[#e9c349]/20">
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={`https://wa.me/98${selectedCustomer.phone.replace(/^0/, '')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-[#063b2f] text-[#a0d1c0] border border-[#e9c349]/30 text-xs px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-[#084b3c]"
+                >
+                  <Phone className="w-4 h-4 text-[#e9c349]" />
+                  <span>پیام در واتس‌اپ</span>
+                </a>
+
+                <a
+                  href={`tel:${selectedCustomer.phone}`}
+                  className="bg-[#181a19] text-[#e2e3e0] border border-white/10 text-xs px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-white/5"
+                >
+                  <Phone className="w-4 h-4 text-[#e9c349]" />
+                  <span>تماس تلفنی</span>
+                </a>
+              </div>
+
+              {/* Archive / Restore Toggle Button */}
+              {selectedCustomer.isArchived ? (
+                <button
+                  type="button"
+                  onClick={() => handleArchiveToggle(selectedCustomer, false)}
+                  className="px-3.5 py-2 bg-emerald-950 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-900 cursor-pointer"
+                >
+                  <ArchiveRestore className="w-4 h-4" />
+                  <span>بازگردانی پرونده</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleArchiveToggle(selectedCustomer, true)}
+                  className="px-3.5 py-2 bg-neutral-900 border border-neutral-700 text-neutral-300 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-neutral-800 hover:text-white cursor-pointer"
+                >
+                  <Archive className="w-4 h-4" />
+                  <span>بایگانی پرونده</span>
+                </button>
+              )}
             </div>
 
             {/* Tags Management */}
             <div className="space-y-2">
               <label className="text-xs font-bold text-[#e2e3e0] flex items-center gap-1.5">
                 <Tag className="w-4 h-4 text-[#e9c349]" />
-                <span>برچسب‌های مشتری (Tags):</span>
+                <span>برچسب‌های پرونده هنرجو (Tags):</span>
               </label>
               <div className="flex flex-wrap items-center gap-2">
                 {(selectedCustomer.tags || []).map((t, idx) => (
@@ -534,11 +825,18 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
                     placeholder="برچسب جدید..."
                     value={tagInput}
                     onChange={(e) => setTagInput(e.target.value)}
-                    className="bg-[#111413] border border-[#e9c349]/20 text-xs text-white px-2.5 py-1 rounded-lg w-28 outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTag();
+                      }
+                    }}
+                    className="bg-[#111413] border border-[#e9c349]/20 text-xs text-white px-2.5 py-1 rounded-lg w-28 outline-none focus:border-[#e9c349]"
                   />
                   <button
                     onClick={handleAddTag}
-                    className="p-1 bg-[#e9c349] text-[#111413] rounded-lg cursor-pointer"
+                    className="p-1 bg-[#e9c349] text-[#111413] rounded-lg cursor-pointer hover:brightness-110"
+                    title="افزودن برچسب"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -550,20 +848,21 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
             <div className="space-y-2">
               <label className="text-xs font-bold text-[#e2e3e0] flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-[#e9c349]" />
-                <span>یادداشت‌های محرمانه پرسنل و مربی:</span>
+                <span>یادداشت‌های محرمانه و نکات تدریس (مربی و مدیریت):</span>
               </label>
               <textarea
                 rows={3}
                 value={internalNotesEdit}
                 onChange={(e) => setInternalNotesEdit(e.target.value)}
-                placeholder="نکات مهم مانند: آهنگ مورد علاقه، محدودیت حرکتی، سطح آمادگی، ترجیح تایم و..."
+                placeholder="نکات مهم مانند: آهنگ مورد علاقه، محدودیت‌های حرکتی، سطح آمادگی، ترجیح ساعت کلاس و..."
                 className="w-full bg-[#111413] border border-[#e9c349]/20 rounded-xl p-3 text-xs text-[#e2e3e0] outline-none focus:border-[#e9c349]"
               />
               <button
                 onClick={handleSaveInternalNotes}
-                className="bg-[#063b2f] hover:bg-[#084b3c] text-[#a0d1c0] border border-[#e9c349]/30 text-xs px-4 py-1.5 rounded-xl font-bold cursor-pointer"
+                disabled={isSavingNotes}
+                className="bg-[#063b2f] hover:bg-[#084b3c] text-[#a0d1c0] border border-[#e9c349]/30 text-xs px-4 py-1.5 rounded-xl font-bold cursor-pointer transition-colors"
               >
-                ذخیره یادداشت پرونده
+                {isSavingNotes ? 'در حال ذخیره...' : 'ذخیره یادداشت پرونده'}
               </button>
             </div>
 
@@ -592,7 +891,7 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
                   placeholder="ثبت گزارش پیگیری جدید..."
                   value={newNote}
                   onChange={(e) => setNewNote(e.target.value)}
-                  className="flex-1 bg-[#111413] border border-[#e9c349]/20 text-xs text-white px-3 py-2 rounded-xl outline-none"
+                  className="flex-1 bg-[#111413] border border-[#e9c349]/20 text-xs text-white px-3 py-2 rounded-xl outline-none focus:border-[#e9c349]"
                 />
 
                 <button
@@ -633,7 +932,7 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Booking Confirmation Modal */}
       {deleteId && (
         <div
           onClick={(e) => {
@@ -643,13 +942,21 @@ export const BookingsManager: React.FC<BookingsManagerProps> = ({ onNotify }) =>
         >
           <div className="bg-[#181a19] border border-red-500/40 rounded-2xl p-6 max-w-sm w-full text-right space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-red-400">حذف درخواست رزرو</h3>
-            <p className="text-xs text-[#c0c8c4]">آیا از حذف این درخواست مشاوره اطمینان دارید؟</p>
+            <p className="text-xs text-[#c0c8c4]">
+              آیا از حذف این درخواست رزرو اطمینان دارید؟ پرونده کلی مشتری در CRM همچنان محفوظ خواهد ماند.
+            </p>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setDeleteId(null)} className="px-4 py-2 text-xs text-[#c0c8c4]">
+              <button
+                onClick={() => setDeleteId(null)}
+                className="px-4 py-2 text-xs text-[#c0c8c4] hover:text-white"
+              >
                 انصراف
               </button>
-              <button onClick={handleDelete} className="px-5 py-2 bg-red-800 text-white font-bold text-xs rounded-xl">
-                حذف
+              <button
+                onClick={handleDeleteBooking}
+                className="px-5 py-2 bg-red-800 hover:bg-red-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+              >
+                حذف درخواست
               </button>
             </div>
           </div>
