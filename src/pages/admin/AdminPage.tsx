@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useContent } from '../../context/ContentContext';
 import { NavigationPage } from '../../types';
 import { useModalBackHandler } from '../../hooks/useModalBackHandler';
@@ -19,6 +19,9 @@ import {
   RotateCcw,
   CheckCircle2,
   PhoneCall,
+  Cloud,
+  LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 
 import { AdminDashboard } from './AdminDashboard';
@@ -34,6 +37,8 @@ import { BookingsManager } from './BookingsManager';
 import { ContactAndSettingsEditor } from './ContactAndSettingsEditor';
 import { SoloDanceEditor } from './SoloDanceEditor';
 import { MusicEditor } from './MusicEditor';
+import { MediaR2Manager } from './MediaR2Manager';
+import { AdminLoginModal } from '../../components/AdminLoginModal';
 
 interface AdminPageProps {
   onNavigateSite: (page: NavigationPage) => void;
@@ -45,6 +50,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return !!sessionStorage.getItem('admin_auth_token');
+  });
 
   useModalBackHandler(mobileMenuOpen, () => setMobileMenuOpen(false), 'adminMobileMenu');
   useModalBackHandler(showResetModal, () => setShowResetModal(false), 'adminResetModal');
@@ -62,8 +70,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
     notify('محتوا به تنظیمات پیش‌فرض اولیه بازگردانده شد');
   };
 
+  const handleLogout = () => {
+    sessionStorage.removeItem('admin_auth_token');
+    setIsAuthenticated(false);
+    notify('با موفقیت از پنل مدیریت خارج شدید.');
+  };
+
   const navItems = [
     { id: 'dashboard', label: 'داشبورد اصلی', icon: LayoutDashboard },
+    { id: 'bookings', label: 'سامانه CRM و رزروها', icon: Calendar, badge: (content.bookings || []).filter(b => b.status === 'New').length },
+    { id: 'r2media', label: 'مخزن رسانه‌ای R2 Cloud', icon: Cloud },
     { id: 'home', label: 'صفحه اصلی', icon: Home },
     { id: 'tango', label: 'صفحه تانگو', icon: Sparkles },
     { id: 'brideSolo', label: 'صفحه سولو عروس', icon: Users },
@@ -74,9 +90,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
     { id: 'faqs', label: 'سوالات متداول FAQ', icon: HelpCircle },
     { id: 'gallery', label: 'گالری تصاویر', icon: ImageIcon },
     { id: 'instructors', label: 'اساتید و مربیان', icon: Users },
-    { id: 'bookings', label: 'درخواست‌های رزرو', icon: Calendar, badge: (content.bookings || []).filter(b => b.status === 'New').length },
     { id: 'settings', label: 'تنظیمات و تماس', icon: Settings },
   ];
+
+  if (!isAuthenticated) {
+    return (
+      <div className="w-full min-h-screen bg-[#0c0f0e] flex items-center justify-center p-4">
+        <AdminLoginModal
+          onSuccess={() => {
+            setIsAuthenticated(true);
+            notify('ورود به پنل مدیریت با موفقیت انجام شد.');
+          }}
+          onCancel={() => onNavigateSite('home')}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full min-h-screen bg-[#0c0f0e] text-[#e2e3e0] flex flex-col md:flex-row text-right">
@@ -97,17 +126,27 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
           {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
 
-        <div className="font-display font-bold text-sm text-[#e9c349]">
-          پنل مدیریت DANCE ACADEMY
+        <div className="font-display font-bold text-sm text-[#e9c349] flex items-center gap-1.5">
+          <ShieldCheck className="w-4 h-4" />
+          <span>پنل مدیریت CRM و D1</span>
         </div>
 
-        <button
-          onClick={() => onNavigateSite('home')}
-          className="text-xs text-[#a0d1c0] bg-[#063b2f] border border-[#e9c349]/30 px-3 py-1.5 rounded-xl flex items-center gap-1"
-        >
-          <span>مشاهده سایت</span>
-          <ArrowRight className="w-3.5 h-3.5 text-[#e9c349]" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleLogout}
+            className="text-xs text-red-400 bg-red-950/40 border border-red-500/30 p-2 rounded-xl"
+            title="خروج"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onNavigateSite('home')}
+            className="text-xs text-[#a0d1c0] bg-[#063b2f] border border-[#e9c349]/30 px-3 py-1.5 rounded-xl flex items-center gap-1"
+          >
+            <span>سایت</span>
+            <ArrowRight className="w-3.5 h-3.5 text-[#e9c349]" />
+          </button>
+        </div>
       </div>
 
       {/* Admin Sidebar Navigation */}
@@ -116,17 +155,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
           mobileMenuOpen ? 'translate-x-0' : 'max-md:translate-x-full md:translate-x-0'
         }`}
       >
-        <div className="space-y-6">
+        <div className="space-y-5">
           {/* Logo & Header */}
           <div className="border-b border-[#e9c349]/20 pb-4 space-y-1">
-            <div className="font-display text-xl font-bold text-[#e9c349]">
-              DANCE ACADEMY
+            <div className="flex items-center justify-between">
+              <div className="font-display text-xl font-bold text-[#e9c349]">
+                DANCE ACADEMY
+              </div>
+              <span className="text-[10px] bg-[#063b2f] text-[#a0d1c0] border border-[#e9c349]/40 px-2 py-0.5 rounded-full font-mono">
+                D1 + R2 Ready
+              </span>
             </div>
-            <p className="text-[11px] text-[#c0c8c4]">سیستم مدیریت محتوای اختصاصی</p>
+            <p className="text-[11px] text-[#c0c8c4]">سیستم مدیریت محتوا و CRM مشتریان</p>
           </div>
 
           {/* Nav List */}
-          <nav className="space-y-1.5 overflow-y-auto max-h-[calc(100vh-260px)] pr-1">
+          <nav className="space-y-1.5 overflow-y-auto max-h-[calc(100vh-270px)] pr-1">
             {navItems.map((item) => {
               const IconComp = item.icon;
               const isActive = activeTab === item.id;
@@ -137,7 +181,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
                     setActiveTab(item.id);
                     setMobileMenuOpen(false);
                   }}
-                  className={`w-full p-3 rounded-xl text-xs md:text-sm font-medium flex items-center justify-between transition-all cursor-pointer ${
+                  className={`w-full p-2.5 rounded-xl text-xs md:text-sm font-medium flex items-center justify-between transition-all cursor-pointer ${
                     isActive
                       ? 'bg-[#063b2f] text-[#a0d1c0] border border-[#e9c349]/40 font-bold shadow-lg shadow-[#063b2f]/50'
                       : 'text-[#c0c8c4] hover:bg-white/5 hover:text-white'
@@ -163,25 +207,38 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
         <div className="pt-4 border-t border-[#e9c349]/15 space-y-2">
           <button
             onClick={() => onNavigateSite('home')}
-            className="w-full py-2.5 bg-[#181a19] hover:bg-white/5 border border-[#e9c349]/30 text-[#e9c349] font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
+            className="w-full py-2 bg-[#181a19] hover:bg-white/5 border border-[#e9c349]/30 text-[#e9c349] font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
           >
             <span>بازگشت به نمایش اصلی سایت</span>
             <ArrowRight className="w-4 h-4" />
           </button>
 
-          <button
-            onClick={() => setShowResetModal(true)}
-            className="w-full py-2 bg-red-950/30 hover:bg-red-900/50 border border-red-500/20 text-red-300 text-[11px] rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-red-400" />
-            <span>بازگردانی به متون اولیه آکادمی</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="flex-1 py-2 bg-red-950/30 hover:bg-red-900/50 border border-red-500/20 text-red-300 text-[11px] rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-red-400" />
+              <span>ریست کارخانه</span>
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="py-2 px-3 bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-red-300 text-[11px] rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors"
+              title="خروج از حساب مدیریت"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>خروج</span>
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* Main Content Workspace */}
       <main className="flex-1 p-4 md:p-10 max-w-6xl mx-auto w-full min-h-screen pt-6 md:pt-10">
         {activeTab === 'dashboard' && <AdminDashboard onNavigateTab={setActiveTab} onNotify={notify} />}
+        {activeTab === 'bookings' && <BookingsManager onNotify={notify} />}
+        {activeTab === 'r2media' && <MediaR2Manager onNotify={notify} />}
         {activeTab === 'home' && <HomeEditor onNotify={notify} />}
         {activeTab === 'tango' && <TangoEditor onNotify={notify} />}
         {activeTab === 'brideSolo' && <BrideSoloEditor onNotify={notify} />}
@@ -192,7 +249,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
         {activeTab === 'styles' && <StylesEditor onNotify={notify} />}
         {activeTab === 'gallery' && <GalleryEditor onNotify={notify} />}
         {activeTab === 'instructors' && <InstructorsEditor onNotify={notify} />}
-        {activeTab === 'bookings' && <BookingsManager onNotify={notify} />}
         {activeTab === 'settings' && <ContactAndSettingsEditor onNotify={notify} />}
       </main>
 

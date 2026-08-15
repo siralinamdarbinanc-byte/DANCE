@@ -14,6 +14,7 @@ import {
   MusicCategory,
 } from '../types';
 import { INITIAL_ACADEMY_CONTENT } from '../data/initialContent';
+import { api } from '../api/client';
 
 const STORAGE_KEY = 'dance_academy_cms_data_v1';
 
@@ -157,14 +158,48 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  // Auto save to localStorage whenever content updates
+  // Auto save to localStorage and Cloudflare D1
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(content));
     } catch (e) {
       console.error('Failed to save content to localStorage:', e);
     }
+    // Async background sync to Cloudflare D1
+    api.syncContent(content).catch(() => {});
   }, [content]);
+
+  // Initial Sync with Backend API (Cloudflare D1 / Server)
+  useEffect(() => {
+    const syncRemoteData = async () => {
+      try {
+        // 1. Fetch Cloudflare D1 CMS Content Store
+        const remoteContent = await api.fetchContent();
+        if (remoteContent && remoteContent.home) {
+          setContent((prev) => ({
+            ...prev,
+            ...remoteContent,
+          }));
+        }
+
+        // 2. Fetch Cloudflare D1 Bookings
+        const remoteBookings = await api.fetchBookings();
+        if (remoteBookings && remoteBookings.length > 0) {
+          setContent((prev) => {
+            const existingIds = new Set(prev.bookings.map((b) => b.id));
+            const merged = [...remoteBookings.filter((b) => !existingIds.has(b.id)), ...prev.bookings];
+            return {
+              ...prev,
+              bookings: merged,
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('API sync deferred; working in offline/cache mode');
+      }
+    };
+    syncRemoteData();
+  }, []);
 
   const updateContent = (newContent: CentralAcademyContent) => {
     setContent(newContent);
@@ -413,6 +448,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...prev,
       bookings: [newBooking, ...prev.bookings],
     }));
+
+    // Async sync to Cloudflare D1 / Backend API
+    api.createBooking(bookingData).catch((err) => {
+      console.warn('Failed to sync new booking to server:', err);
+    });
   };
 
   const updateBookingStatus = (id: string, status: BookingStatus) => {
@@ -420,6 +460,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...prev,
       bookings: prev.bookings.map((b) => (b.id === id ? { ...b, status } : b)),
     }));
+
+    // Async update to Cloudflare D1 / Backend API
+    api.updateBookingStatus(id, status).catch((err) => {
+      console.warn('Failed to update booking status on server:', err);
+    });
   };
 
   const deleteBooking = (id: string) => {
@@ -427,6 +472,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...prev,
       bookings: prev.bookings.filter((b) => b.id !== id),
     }));
+
+    // Async delete from Cloudflare D1 / Backend API
+    api.deleteBooking(id).catch((err) => {
+      console.warn('Failed to delete booking from server:', err);
+    });
   };
 
   return (

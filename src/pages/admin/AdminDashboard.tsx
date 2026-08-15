@@ -78,7 +78,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab, o
           className="bg-[#181a19] border border-[#e9c349]/20 hover:border-[#e9c349]/60 rounded-2xl p-5 cursor-pointer transition-all space-y-3"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#c0c8c4] font-medium">درخواست‌های مشاوره</span>
+            <span className="text-xs text-[#c0c8c4] font-medium">پرونده‌های CRM و رزرو</span>
             <div className="p-2 bg-[#063b2f] rounded-xl text-[#e9c349]">
               <Calendar className="w-5 h-5" />
             </div>
@@ -90,6 +90,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab, o
                 {newBookingsCount} مورد جدید
               </span>
             )}
+          </div>
+        </div>
+
+        <div
+          onClick={() => onNavigateTab('r2media')}
+          className="bg-[#181a19] border border-[#e9c349]/20 hover:border-[#e9c349]/60 rounded-2xl p-5 cursor-pointer transition-all space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[#c0c8c4] font-medium">مخزن ابری R2 Bucket</span>
+            <div className="p-2 bg-[#063b2f] rounded-xl text-[#e9c349]">
+              <Sparkles className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-[#e2e3e0] font-display">Active</span>
+            <span className="text-xs text-[#a0d1c0] font-mono">D1 + R2 Ready</span>
           </div>
         </div>
 

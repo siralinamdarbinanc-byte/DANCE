@@ -325,3 +325,42 @@ export interface CentralAcademyContent {
   seo: Record<NavigationPage, SeoContent>;
 }
 
+export interface CrmCustomer {
+  id: string;
+  phone: string;
+  coupleName: string;
+  danceStyle: string;
+  weddingDate: string;
+  status: BookingStatus;
+  totalBookings: number;
+  internalNotes: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CrmInteraction {
+  id: string;
+  customerPhone: string;
+  type: 'call' | 'note' | 'meeting' | 'status_change' | 'music_choice';
+  note: string;
+  author: string;
+  createdAt: string;
+}
+
+export interface AdminAuthState {
+  isAuthenticated: boolean;
+  token: string | null;
+  username: string | null;
+}
+
+export interface MediaAsset {
+  id: string;
+  filename: string;
+  fileType: 'image' | 'audio' | 'video';
+  mimeType: string;
+  url: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
