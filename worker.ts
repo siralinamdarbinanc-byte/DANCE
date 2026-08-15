@@ -108,6 +108,7 @@ export default {
             runtime: 'Cloudflare Worker Native',
             hasD1: !!env.DB,
             hasR2: !!env.MEDIA_BUCKET,
+            r2Status: env.MEDIA_BUCKET ? 'active' : 'optional_disabled',
             timestamp: new Date().toISOString(),
           }),
           { headers: { 'Content-Type': 'application/json', ...corsHeaders } }
@@ -501,7 +502,7 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // 6. CLOUDFLARE R2 MEDIA STORAGE
+      // 6. CLOUDFLARE R2 MEDIA STORAGE (OPTIONAL)
       // -------------------------------------------------------------
       // 6.1 Media List
       if (url.pathname === '/api/media' && request.method === 'GET') {
@@ -525,14 +526,14 @@ export default {
         });
       }
 
-      // 6.2 Raw Media Stream from R2 Bucket
+      // 6.2 Raw Media Stream from R2 Bucket (if bound)
       const rawMediaMatch = url.pathname.match(/^\/api\/media\/raw\/([^/]+)$/);
       if (rawMediaMatch && request.method === 'GET') {
         const key = rawMediaMatch[1];
         if (env.MEDIA_BUCKET) {
           const object = await env.MEDIA_BUCKET.get(key);
           if (!object) {
-            return new Response('File Not Found in R2', { status: 404, headers: corsHeaders });
+            return new Response('File Not Found in R2 Bucket', { status: 404, headers: corsHeaders });
           }
           const headers = new Headers();
           object.writeHttpMetadata(headers);
@@ -540,10 +541,59 @@ export default {
           headers.set('Cache-Control', 'public, max-age=31536000, immutable');
           return new Response(object.body, { headers });
         }
-        return new Response('R2 Bucket not configured', { status: 404, headers: corsHeaders });
+        return new Response('مخزن R2 فعال نیست (اختیاری)', { status: 404, headers: corsHeaders });
       }
 
-      // 6.3 Upload Media to R2 Bucket
+      // 6.3 Add Media by External URL (Works directly with D1 even without R2)
+      if (url.pathname === '/api/media/add-url' && request.method === 'POST') {
+        if (!isAuthorized(request, env)) {
+          return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const body = (await request.json()) as { url?: string; filename?: string; fileType?: string };
+        if (!body.url) {
+          return new Response(JSON.stringify({ error: 'آدرس لینک فایل الزامی است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const fileId = `url-media-${Date.now()}`;
+        const filename = body.filename || 'رسانه اختصاصی';
+        const fileType = body.fileType || 'image';
+        const mimeType = fileType === 'audio' ? 'audio/mpeg' : fileType === 'video' ? 'video/mp4' : 'image/jpeg';
+        const createdAt = new Date().toLocaleDateString('fa-IR');
+
+        const newAsset = {
+          id: fileId,
+          filename,
+          fileType,
+          mimeType,
+          url: body.url,
+          sizeBytes: 0,
+          createdAt,
+        };
+
+        if (env.DB) {
+          await env.DB.prepare(
+            'INSERT INTO media_assets (id, filename, file_type, mime_type, url, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          )
+            .bind(fileId, filename, fileType, mimeType, body.url, 0, createdAt)
+            .run();
+        } else {
+          memoryStore.media.unshift(newAsset);
+        }
+
+        return new Response(JSON.stringify({ success: true, asset: newAsset }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // 6.4 Upload Media to R2 Bucket (with graceful fallback if R2 is not enabled)
       if (url.pathname === '/api/upload' && request.method === 'POST') {
         if (!isAuthorized(request, env)) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز برای آپلود فایل.' }), {
@@ -562,6 +612,18 @@ export default {
           });
         }
 
+        // If R2 is not bound in production, notify gracefully without crashing
+        if (!env.MEDIA_BUCKET) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              r2Active: false,
+              error: 'فضای ابری R2 در حال حاضر فعال نیست (اختیاری). لطفاً از دکمه افزودن لینک مستقیم رسانه استفاده نمایید.',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
         const fileId = `r2-${Date.now()}`;
         const key = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
         const mimeType = file.type || 'application/octet-stream';
@@ -569,12 +631,10 @@ export default {
         const createdAt = new Date().toLocaleDateString('fa-IR');
         let fileUrl = `/api/media/raw/${key}`;
 
-        if (env.MEDIA_BUCKET) {
-          const buffer = await file.arrayBuffer();
-          await env.MEDIA_BUCKET.put(key, buffer, {
-            httpMetadata: { contentType: mimeType },
-          });
-        }
+        const buffer = await file.arrayBuffer();
+        await env.MEDIA_BUCKET.put(key, buffer, {
+          httpMetadata: { contentType: mimeType },
+        });
 
         const newAsset = {
           id: fileId,
@@ -602,7 +662,7 @@ export default {
         });
       }
 
-      // 6.4 Delete Media
+      // 6.5 Delete Media
       const deleteMediaMatch = url.pathname.match(/^\/api\/media\/([^/]+)$/);
       if (deleteMediaMatch && request.method === 'DELETE') {
         if (!isAuthorized(request, env)) {

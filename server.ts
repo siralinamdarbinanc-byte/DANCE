@@ -64,6 +64,9 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     runtime: 'Node.js Fullstack Server (D1 & R2 Ready)',
+    hasD1: true,
+    hasR2: false,
+    r2Status: 'optional_disabled',
     timestamp: new Date().toISOString(),
   });
 });
@@ -269,6 +272,27 @@ app.post('/api/content', verifyAdminAuth, (req: Request, res: Response) => {
 // -------------------------------------------------------------
 app.get('/api/media', (req: Request, res: Response) => {
   res.json(mediaAssetsStore);
+});
+
+app.post('/api/media/add-url', verifyAdminAuth, (req: Request, res: Response) => {
+  const { url, filename, fileType } = req.body;
+  if (!url) {
+    return res.status(400).json({ error: 'آدرس لینک فایل الزامی است.' });
+  }
+
+  const type = fileType || 'image';
+  const newAsset = {
+    id: `url-media-${Date.now()}`,
+    filename: filename || 'رسانه اختصاصی',
+    fileType: type,
+    mimeType: type === 'audio' ? 'audio/mpeg' : type === 'video' ? 'video/mp4' : 'image/jpeg',
+    url,
+    sizeBytes: 0,
+    createdAt: new Date().toLocaleDateString('fa-IR'),
+  };
+
+  mediaAssetsStore.unshift(newAsset);
+  res.status(201).json({ success: true, asset: newAsset });
 });
 
 app.post('/api/upload', verifyAdminAuth, (req: Request, res: Response) => {

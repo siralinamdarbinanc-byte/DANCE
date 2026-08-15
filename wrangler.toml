@@ -11,10 +11,18 @@ binding = "DB"
 database_name = "dance_academy_db"
 database_id = "d1-dance-academy-id-placeholder"
 
-[[r2_buckets]]
-binding = "MEDIA_BUCKET"
-bucket_name = "dance-academy-media"
+# ---------------------------------------------------------------------------
+# CLOUDFLARE R2 STORAGE (اختیاری - فعلاً غیرفعال به دلیل عدم نیاز به کارت پرداخت)
+# در آینده برای فعال‌سازی کامل R2 کافی است:
+# ۱. دستور زیر را اجرا کنید:
+#    npx wrangler r2 bucket create dance-academy-media
+# ۲. سه خط زیر را از کامنت خارج کنید:
+# [[r2_buckets]]
+# binding = "MEDIA_BUCKET"
+# bucket_name = "dance-academy-media"
+# ---------------------------------------------------------------------------
 
 [vars]
 ENVIRONMENT = "production"
 JWT_SECRET = "dance_academy_secret_jwt_key_2026"
+

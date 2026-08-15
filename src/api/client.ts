@@ -183,7 +183,20 @@ export const api = {
     }
   },
 
-  // Media API (R2 Cloudflare Integration)
+  // Health Check & Cloudflare Bindings Status
+  async checkHealth(): Promise<{ status: string; hasD1: boolean; hasR2: boolean; r2Status?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/health`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('API health check error');
+    }
+    return { status: 'ok', hasD1: true, hasR2: false, r2Status: 'optional_disabled' };
+  },
+
+  // Media API (R2 Cloudflare Integration & Direct URL Support)
   async fetchMediaList(): Promise<MediaAsset[]> {
     try {
       const res = await fetch(`${API_BASE}/media`);
@@ -197,7 +210,24 @@ export const api = {
     return [];
   },
 
-  async uploadMedia(file: File): Promise<MediaAsset | null> {
+  async addMediaUrl(url: string, filename: string, fileType: 'image' | 'audio' | 'video'): Promise<MediaAsset | null> {
+    try {
+      const res = await fetch(`${API_BASE}/media/add-url`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ url, filename, fileType }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.asset || null;
+      }
+    } catch (e) {
+      console.error('API addMediaUrl error:', e);
+    }
+    return null;
+  },
+
+  async uploadMedia(file: File): Promise<{ asset?: MediaAsset; r2Active?: boolean; error?: string } | null> {
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -210,7 +240,11 @@ export const api = {
       });
 
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        if (data.r2Active === false) {
+          return { r2Active: false, error: data.error };
+        }
+        return { asset: data, r2Active: true };
       }
     } catch (e) {
       console.error('File upload error:', e);
