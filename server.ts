@@ -1,9 +1,72 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
+import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
 const PORT = 3000;
+
+// Multer memory storage configuration for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+});
+
+// GitHub API Environment Configuration
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const GITHUB_REPO_OWNER = process.env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+const GITHUB_REPO_NAME = process.env.GITHUB_REPO_NAME || 'DANCE';
+const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
+
+// Helper function to query GitHub Contents API
+async function callGitHubContentsApi(
+  endpointPath: string,
+  options: {
+    method?: string;
+    body?: any;
+    headers?: Record<string, string>;
+  } = {}
+): Promise<{ ok: boolean; status: number; data: any }> {
+  if (!GITHUB_TOKEN) {
+    return {
+      ok: false,
+      status: 400,
+      data: {
+        error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) در متغیرهای محیطی سرور تنظیم نشده است.',
+        code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+      },
+    };
+  }
+
+  const cleanPath = endpointPath.replace(/^\/+/, '');
+  let url = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/contents/${cleanPath}`;
+  if (!options.method || options.method === 'GET') {
+    url += `${url.includes('?') ? '&' : '?'}ref=${encodeURIComponent(GITHUB_BRANCH)}`;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: options.method || 'GET',
+      headers: {
+        Accept: 'application/vnd.github.v3+json',
+        'User-Agent': 'DanceAcademy-Server/1.0',
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...options.headers,
+      },
+      ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+    });
+
+    const data = await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: { error: err?.message || 'خطا در برقراری ارتباط با GitHub API' },
+    };
+  }
+}
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -388,61 +451,226 @@ app.post('/api/content', verifyAdminAuth, (req: Request, res: Response) => {
 // 5. GITHUB REPOSITORY MEDIA MANAGER ENDPOINTS
 // -------------------------------------------------------------
 app.get('/api/media/status', (req: Request, res: Response) => {
+  const hasToken = Boolean(GITHUB_TOKEN && GITHUB_TOKEN.trim().length > 0);
   res.json({
-    githubConfigured: false,
-    owner: 'aliinndd',
-    repo: 'dance',
-    branch: 'main',
+    githubConfigured: hasToken,
+    owner: GITHUB_REPO_OWNER,
+    repo: GITHUB_REPO_NAME,
+    branch: GITHUB_BRANCH,
     directories: ALLOWED_DIRECTORIES,
     maxSizeBytes: MAX_MEDIA_SIZE_BYTES,
   });
 });
 
-app.get('/api/media', (req: Request, res: Response) => {
+app.get('/api/media', async (req: Request, res: Response) => {
   const { category, search } = req.query as { category?: string; search?: string };
-  let list = [...mediaAssetsStore];
+  let allAssets: any[] = [];
+
+  if (GITHUB_TOKEN) {
+    const folderPromises = ALLOWED_DIRECTORIES.map(async (dir) => {
+      const ghRes = await callGitHubContentsApi(dir);
+      if (!ghRes.ok || !Array.isArray(ghRes.data)) {
+        return [];
+      }
+      return ghRes.data
+        .filter((item: any) => item.type === 'file')
+        .map((file: any) => {
+          const validation = sanitizeAndValidateMediaPath(file.path);
+          const extMatch = file.name.match(/\.([a-zA-Z0-9]+)$/);
+          const ext = extMatch ? extMatch[1].toLowerCase() : '';
+          const fileType = dir === 'public/images' ? 'image' : dir === 'public/audio' ? 'audio' : 'video';
+          const mimeType = MIME_MAP[ext] || (validation.valid && validation.mimeType) || 'application/octet-stream';
+          const cleanUrl = `/${file.path.replace(/^public\//, '')}`;
+          const rawUrl =
+            file.download_url ||
+            `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/${GITHUB_BRANCH}/${file.path}`;
+
+          return {
+            id: `gh-${file.sha?.slice(0, 10) || Date.now()}-${file.name}`,
+            filename: file.name,
+            fileType,
+            mimeType,
+            url: cleanUrl,
+            rawUrl,
+            path: file.path,
+            sha: file.sha,
+            sizeBytes: file.size || 0,
+            createdAt: new Date().toLocaleDateString('fa-IR'),
+            lastModified: new Date().toLocaleDateString('fa-IR'),
+            source: 'github',
+          };
+        });
+    });
+
+    const results = await Promise.allSettled(folderPromises);
+    for (const result of results) {
+      if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+        allAssets.push(...result.value);
+      }
+    }
+  }
+
+  // Merge any external URL assets from memory
+  const urlOnlyAssets = mediaAssetsStore.filter((m) => m.source === 'url' || m.id.startsWith('url-'));
+  for (const item of urlOnlyAssets) {
+    if (!allAssets.some((a) => a.url === item.url || a.filename === item.filename)) {
+      allAssets.push(item);
+    }
+  }
+
   if (category && ['image', 'audio', 'video'].includes(category)) {
-    list = list.filter((m) => m.fileType === category);
+    allAssets = allAssets.filter((m) => m.fileType === category);
   }
   if (search) {
     const q = search.toLowerCase().trim();
-    list = list.filter((m) => (m.filename || '').toLowerCase().includes(q) || (m.path || '').toLowerCase().includes(q));
+    allAssets = allAssets.filter((m) => (m.filename || '').toLowerCase().includes(q) || (m.path || '').toLowerCase().includes(q));
   }
-  res.json(list);
+
+  res.json(allAssets);
 });
 
-app.post('/api/media/upload', verifyAdminAuth, (req: Request, res: Response) => {
-  const { filename, folder, contentBase64, customFilename } = req.body;
-  const safeName = (customFilename || filename || `file_${Date.now()}.jpg`).replace(/[\\/:*?"<>|]/g, '_').trim();
-  const targetFolder = folder && ALLOWED_DIRECTORIES.includes(folder) ? folder : 'public/images';
-  const fullPath = `${targetFolder}/${safeName}`;
-  const validation = sanitizeAndValidateMediaPath(fullPath);
+// Upload Media Handler (Supports multipart file and base64 JSON)
+const handleUploadMediaRequest = async (req: Request, res: Response) => {
+  let fileBuffer: Buffer | null = null;
+  let originalName = '';
+  let targetFolder: 'public/images' | 'public/audio' | 'public/videos' = 'public/images';
+  let customFilename = '';
 
+  if (req.file) {
+    fileBuffer = req.file.buffer;
+    originalName = req.file.originalname;
+    if (req.body.folder && ALLOWED_DIRECTORIES.includes(req.body.folder)) {
+      targetFolder = req.body.folder;
+    }
+    customFilename = req.body.filename || '';
+  } else if (req.body && req.body.contentBase64) {
+    originalName = req.body.filename || 'file.jpg';
+    if (req.body.folder && ALLOWED_DIRECTORIES.includes(req.body.folder)) {
+      targetFolder = req.body.folder;
+    }
+    customFilename = req.body.customFilename || req.body.filename || '';
+    try {
+      fileBuffer = Buffer.from(req.body.contentBase64, 'base64');
+    } catch {
+      return res.status(400).json({ error: 'محتوای فایل base64 نامعتبر است.' });
+    }
+  } else {
+    return res.status(400).json({ error: 'هیچ فایلی برای آپلود ارسال نشده است.' });
+  }
+
+  if (!fileBuffer || fileBuffer.length === 0) {
+    return res.status(400).json({ error: 'فایل ارسالی خالی است.' });
+  }
+
+  if (fileBuffer.length > MAX_MEDIA_SIZE_BYTES) {
+    return res.status(400).json({
+      error: `حجم فایل بیشتر از سقف مجاز ۱۰۰ مگابایت است (${(fileBuffer.length / 1024 / 1024).toFixed(1)}MB).`,
+    });
+  }
+
+  // Clean and sanitize filename
+  const safeName = (customFilename || originalName)
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '_')
+    .trim();
+
+  const extMatch = safeName.match(/\.([a-zA-Z0-9]+)$/);
+  if (!extMatch) {
+    return res.status(400).json({ error: 'فایل فاقد پسوند مجاز است.' });
+  }
+  const ext = `.${extMatch[1].toLowerCase()}`;
+
+  if (ALLOWED_EXTENSIONS.image.includes(ext)) {
+    targetFolder = 'public/images';
+  } else if (ALLOWED_EXTENSIONS.audio.includes(ext)) {
+    targetFolder = 'public/audio';
+  } else if (ALLOWED_EXTENSIONS.video.includes(ext)) {
+    targetFolder = 'public/videos';
+  } else {
+    return res.status(400).json({
+      error: `پسوند ${ext} پشتیبانی نمی‌شود. پسوندهای مجاز: تصاویر (jpg, jpeg, png, webp) | موزیک (mp3, wav, m4a) | ویدیو (mp4, webm, mov)`,
+    });
+  }
+
+  const fullRepoPath = `${targetFolder}/${safeName}`;
+  const validation = sanitizeAndValidateMediaPath(fullRepoPath);
   if (!validation.valid) {
     return res.status(400).json({ error: validation.error });
   }
 
+  if (!GITHUB_TOKEN) {
+    return res.status(400).json({
+      error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) در سرور تنظیم نشده است. لطفاً متغیر GITHUB_TOKEN را به متغیرهای محیطی اضافه فرمایید.',
+      code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+    });
+  }
+
+  const base64Content = fileBuffer.toString('base64');
+
+  // Step 1: Check if file already exists in GitHub to retrieve existing SHA
+  const checkRes = await callGitHubContentsApi(fullRepoPath);
+  let existingSha: string | undefined;
+  if (checkRes.ok && checkRes.data && checkRes.data.sha) {
+    existingSha = checkRes.data.sha;
+  }
+
+  // Step 2: PUT file to GitHub Contents API
+  const putRes = await callGitHubContentsApi(fullRepoPath, {
+    method: 'PUT',
+    body: {
+      message: `Upload media asset: ${safeName} via Admin Media Manager`,
+      content: base64Content,
+      branch: GITHUB_BRANCH,
+      ...(existingSha ? { sha: existingSha } : {}),
+    },
+  });
+
+  if (!putRes.ok) {
+    const errMsg = putRes.data?.message || 'خطا در ثبت فایل در مخزن گیت‌هاب';
+    return res.status(putRes.status || 500).json({
+      error: `خطا از سوی GitHub API (${putRes.status}): ${errMsg}`,
+      details: putRes.data,
+    });
+  }
+
+  // Step 3: Verification - GET GitHub contents again to verify that the file actually exists
+  const verifyRes = await callGitHubContentsApi(fullRepoPath);
+  if (!verifyRes.ok || !verifyRes.data) {
+    return res.status(500).json({
+      error: 'فایل به گیت‌هاب ارسال شد اما در اعتبارسنجی نهایی مخزن یافت نشد.',
+    });
+  }
+
+  const verifiedFile = verifyRes.data;
+  const createdSha = verifiedFile.sha || putRes.data?.content?.sha || existingSha || 'sha-verified';
+  const cleanUrl = `/${fullRepoPath.replace(/^public\//, '')}`;
+  const rawUrl =
+    verifiedFile.download_url ||
+    `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/${GITHUB_BRANCH}/${fullRepoPath}`;
+
   const nowFa = new Date().toLocaleDateString('fa-IR');
-  const cleanUrl = `/${fullPath.replace(/^public\//, '')}`;
   const newAsset = {
-    id: `local-${Date.now()}-${safeName}`,
+    id: `gh-${createdSha.slice(0, 10)}-${safeName}`,
     filename: safeName,
     fileType: validation.fileType || 'image',
     mimeType: validation.mimeType || 'application/octet-stream',
     url: cleanUrl,
-    rawUrl: cleanUrl,
-    path: fullPath,
-    sizeBytes: contentBase64 ? Math.round((contentBase64.length * 3) / 4) : 250000,
+    rawUrl,
+    path: fullRepoPath,
+    sha: createdSha,
+    sizeBytes: verifiedFile.size || fileBuffer.length,
     createdAt: nowFa,
     lastModified: nowFa,
-    source: 'local',
+    source: 'github',
   };
 
-  mediaAssetsStore.unshift(newAsset);
-  res.status(201).json({ success: true, asset: newAsset });
-});
+  return res.status(201).json({ success: true, asset: newAsset });
+};
 
-app.put('/api/media/rename', verifyAdminAuth, (req: Request, res: Response) => {
+app.post('/api/media/upload', verifyAdminAuth, upload.single('file'), handleUploadMediaRequest);
+app.post('/api/upload', verifyAdminAuth, upload.single('file'), handleUploadMediaRequest);
+
+app.put('/api/media/rename', verifyAdminAuth, async (req: Request, res: Response) => {
   const { oldPath, newFilename, targetFolder } = req.body;
   if (!oldPath || !newFilename) {
     return res.status(400).json({ error: 'مسیر قبلی و نام جدید الزامی است.' });
@@ -466,50 +694,137 @@ app.put('/api/media/rename', verifyAdminAuth, (req: Request, res: Response) => {
     return res.status(400).json({ error: newValidation.error });
   }
 
-  const idx = mediaAssetsStore.findIndex((m) => m.path === oldValidation.normalizedPath || m.filename === oldValidation.filename);
-  const nowFa = new Date().toLocaleDateString('fa-IR');
-  const cleanUrl = `/${fullNewPath.replace(/^public\//, '')}`;
+  if (!GITHUB_TOKEN) {
+    return res.status(400).json({
+      error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) در سرور تنظیم نشده است.',
+      code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+    });
+  }
 
+  // 1. Fetch old file from GitHub to get content base64 and sha
+  const oldFileRes = await callGitHubContentsApi(oldValidation.normalizedPath);
+  if (!oldFileRes.ok || !oldFileRes.data) {
+    return res.status(oldFileRes.status || 404).json({
+      error: `فایل اصلی در مخزن گیت‌هاب یافت نشد: ${oldFileRes.data?.message || ''}`,
+    });
+  }
+
+  const oldContentBase64 = oldFileRes.data.content?.replace(/\s+/g, '') || '';
+  const oldSha = oldFileRes.data.sha;
+
+  // 2. Put new file with the content
+  const putNewRes = await callGitHubContentsApi(fullNewPath, {
+    method: 'PUT',
+    body: {
+      message: `Rename ${oldValidation.filename} to ${safeName} via Admin Media Manager`,
+      content: oldContentBase64,
+      branch: GITHUB_BRANCH,
+    },
+  });
+
+  if (!putNewRes.ok) {
+    return res.status(putNewRes.status || 500).json({
+      error: `خطا در ایجاد فایل با نام جدید: ${putNewRes.data?.message || ''}`,
+    });
+  }
+
+  // 3. Delete old file
+  if (oldValidation.normalizedPath !== fullNewPath && oldSha) {
+    await callGitHubContentsApi(oldValidation.normalizedPath, {
+      method: 'DELETE',
+      body: {
+        message: `Remove old file after rename to ${safeName}`,
+        sha: oldSha,
+        branch: GITHUB_BRANCH,
+      },
+    });
+  }
+
+  // 4. Verify new file exists
+  const verifyRes = await callGitHubContentsApi(fullNewPath);
+  const finalFile = verifyRes.ok && verifyRes.data ? verifyRes.data : putNewRes.data?.content;
+
+  const cleanUrl = `/${fullNewPath.replace(/^public\//, '')}`;
+  const rawUrl =
+    finalFile?.download_url ||
+    `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/${GITHUB_BRANCH}/${fullNewPath}`;
+
+  const nowFa = new Date().toLocaleDateString('fa-IR');
   const updatedAsset = {
-    id: `local-${Date.now()}-${safeName}`,
+    id: `gh-${finalFile?.sha?.slice(0, 10) || Date.now()}-${safeName}`,
     filename: safeName,
     fileType: newValidation.fileType || 'image',
     mimeType: newValidation.mimeType || 'application/octet-stream',
     url: cleanUrl,
-    rawUrl: cleanUrl,
+    rawUrl,
     path: fullNewPath,
-    sizeBytes: idx >= 0 ? mediaAssetsStore[idx].sizeBytes : 150000,
+    sha: finalFile?.sha,
+    sizeBytes: oldFileRes.data.size || 0,
     createdAt: nowFa,
     lastModified: nowFa,
-    source: 'local',
+    source: 'github',
   };
-
-  if (idx >= 0) {
-    mediaAssetsStore[idx] = updatedAsset;
-  } else {
-    mediaAssetsStore.unshift(updatedAsset);
-  }
 
   res.json({ success: true, asset: updatedAsset });
 });
 
-app.delete('/api/media', verifyAdminAuth, (req: Request, res: Response) => {
+app.delete('/api/media', verifyAdminAuth, async (req: Request, res: Response) => {
   const targetPath = (req.query.path as string) || req.body?.path;
+  const providedSha = (req.query.sha as string) || req.body?.sha;
+
   if (!targetPath) {
     return res.status(400).json({ error: 'مسیر فایل جهت حذف الزامی است.' });
   }
   const validation = sanitizeAndValidateMediaPath(targetPath);
-  if (!validation.valid) {
+  if (!validation.valid || !validation.normalizedPath) {
     return res.status(400).json({ error: validation.error });
   }
-  mediaAssetsStore = mediaAssetsStore.filter((m) => m.path !== validation.normalizedPath && m.filename !== validation.filename);
+
+  if (!GITHUB_TOKEN) {
+    return res.status(400).json({
+      error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) در سرور تنظیم نشده است.',
+      code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+    });
+  }
+
+  let sha = providedSha;
+  if (!sha) {
+    const fileRes = await callGitHubContentsApi(validation.normalizedPath);
+    if (!fileRes.ok || !fileRes.data?.sha) {
+      return res.status(fileRes.status || 404).json({
+        error: `فایل جهت حذف در مخزن گیت‌هاب یافت نشد: ${fileRes.data?.message || ''}`,
+      });
+    }
+    sha = fileRes.data.sha;
+  }
+
+  const deleteRes = await callGitHubContentsApi(validation.normalizedPath, {
+    method: 'DELETE',
+    body: {
+      message: `Delete media asset: ${validation.filename || validation.normalizedPath} via Admin Media Manager`,
+      sha,
+      branch: GITHUB_BRANCH,
+    },
+  });
+
+  if (!deleteRes.ok) {
+    return res.status(deleteRes.status || 500).json({
+      error: `خطا در حذف فایل از گیت‌هاب: ${deleteRes.data?.message || ''}`,
+    });
+  }
+
   res.json({ success: true, path: validation.normalizedPath });
 });
 
-app.delete('/api/media/:id', verifyAdminAuth, (req: Request, res: Response) => {
+app.delete('/api/media/:id', verifyAdminAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
-  mediaAssetsStore = mediaAssetsStore.filter((m) => m.id !== id && m.path !== id && m.filename !== id);
-  res.json({ success: true, id });
+  // If it is a url- media, remove from in-memory store
+  if (id.startsWith('url-') || id.startsWith('r2-media')) {
+    mediaAssetsStore = mediaAssetsStore.filter((m) => m.id !== id);
+    return res.json({ success: true, id });
+  }
+
+  return res.status(400).json({ error: 'برای حذف فایل از پارامتر path استفاده فرمایید.' });
 });
 
 app.post('/api/media/add-url', verifyAdminAuth, (req: Request, res: Response) => {
@@ -530,30 +845,11 @@ app.post('/api/media/add-url', verifyAdminAuth, (req: Request, res: Response) =>
     sizeBytes: 0,
     createdAt: new Date().toLocaleDateString('fa-IR'),
     lastModified: new Date().toLocaleDateString('fa-IR'),
-    source: 'local',
+    source: 'url',
   };
 
   mediaAssetsStore.unshift(newAsset);
   res.status(201).json({ success: true, asset: newAsset });
-});
-
-app.post('/api/upload', verifyAdminAuth, (req: Request, res: Response) => {
-  const sampleMedia = {
-    id: `local-${Date.now()}`,
-    filename: `upload_${Date.now()}.jpg`,
-    fileType: 'image',
-    mimeType: 'image/jpeg',
-    url: '/images/tango_masterclass_banner.jpg',
-    rawUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
-    path: `public/images/upload_${Date.now()}.jpg`,
-    sizeBytes: 245000,
-    createdAt: new Date().toLocaleDateString('fa-IR'),
-    lastModified: new Date().toLocaleDateString('fa-IR'),
-    source: 'local',
-  };
-
-  mediaAssetsStore.unshift(sampleMedia);
-  res.status(201).json({ success: true, asset: sampleMedia });
 });
 
 // -------------------------------------------------------------

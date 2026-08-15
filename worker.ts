@@ -206,8 +206,8 @@ async function fetchFromGitHubContents(
     return { ok: false, status: 500, data: { error: 'GITHUB_TOKEN_NOT_SET' } };
   }
 
-  const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
-  const repo = env.GITHUB_REPO_NAME || 'dance';
+  const owner = env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+  const repo = env.GITHUB_REPO_NAME || 'DANCE';
   const branch = env.GITHUB_BRANCH || 'main';
 
   const cleanPath = endpointPath.replace(/^\/+/, '');
@@ -1073,8 +1073,8 @@ export default {
         return new Response(
           JSON.stringify({
             githubConfigured: hasToken,
-            owner: env.GITHUB_REPO_OWNER || 'aliinndd',
-            repo: env.GITHUB_REPO_NAME || 'dance',
+            owner: env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte',
+            repo: env.GITHUB_REPO_NAME || 'DANCE',
             branch: env.GITHUB_BRANCH || 'main',
             directories: ALLOWED_DIRECTORIES,
             maxSizeBytes: MAX_MEDIA_SIZE_BYTES,
@@ -1092,8 +1092,8 @@ export default {
         const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
 
         if (hasToken) {
-          const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
-          const repo = env.GITHUB_REPO_NAME || 'dance';
+          const owner = env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+          const repo = env.GITHUB_REPO_NAME || 'DANCE';
           const branch = env.GITHUB_BRANCH || 'main';
 
           // Query the 3 folders in parallel
@@ -1194,6 +1194,17 @@ export default {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
           });
+        }
+
+        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+        if (!hasToken) {
+          return new Response(
+            JSON.stringify({
+              error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) در کلودفلر یا سرور تنظیم نشده است.',
+              code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
         }
 
         const contentType = request.headers.get('content-type') || '';
@@ -1300,107 +1311,93 @@ export default {
           });
         }
 
-        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
-        const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
-        const repo = env.GITHUB_REPO_NAME || 'dance';
+        const owner = env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+        const repo = env.GITHUB_REPO_NAME || 'DANCE';
         const branch = env.GITHUB_BRANCH || 'main';
         const nowFa = new Date().toLocaleDateString('fa-IR');
 
-        if (hasToken) {
-          // Convert array buffer to base64
-          const uint8Array = new Uint8Array(fileBuffer);
-          let binary = '';
-          const chunkSize = 8192;
-          for (let i = 0; i < uint8Array.length; i += chunkSize) {
-            binary += String.fromCharCode.apply(null, Array.from(uint8Array.subarray(i, i + chunkSize)));
-          }
-          const base64Content = btoa(binary);
+        // Convert array buffer to base64
+        const uint8Array = new Uint8Array(fileBuffer);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < uint8Array.length; i += chunkSize) {
+          binary += String.fromCharCode.apply(null, Array.from(uint8Array.subarray(i, i + chunkSize)));
+        }
+        const base64Content = btoa(binary);
 
-          // Check if file already exists in GitHub to retrieve existing SHA
-          const checkRes = await fetchFromGitHubContents(fullRepoPath, env);
-          let existingSha: string | undefined;
-          if (checkRes.ok && checkRes.data && checkRes.data.sha) {
-            existingSha = checkRes.data.sha;
-          }
-
-          const putRes = await fetchFromGitHubContents(fullRepoPath, env, {
-            method: 'PUT',
-            body: {
-              message: `Upload media asset: ${safeName} via Admin Media Manager`,
-              content: base64Content,
-              branch,
-              ...(existingSha ? { sha: existingSha } : {}),
-            },
-          });
-
-          if (!putRes.ok) {
-            return new Response(
-              JSON.stringify({
-                error: `خطا در ثبت فایل در مخزن گیت‌هاب: ${putRes.data?.message || 'نامشخص'}`,
-                details: putRes.data,
-              }),
-              { status: putRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-            );
-          }
-
-          const createdSha = putRes.data?.content?.sha || existingSha || 'sha-latest';
-          const cleanUrl = `/${fullRepoPath.replace(/^public\//, '')}`;
-          const rawUrl =
-            putRes.data?.content?.download_url ||
-            `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${fullRepoPath}`;
-
-          const newAsset = {
-            id: `gh-${createdSha.slice(0, 10)}-${safeName}`,
-            filename: safeName,
-            fileType: validation.fileType || 'image',
-            mimeType: validation.mimeType || 'application/octet-stream',
-            url: cleanUrl,
-            rawUrl,
-            path: fullRepoPath,
-            sha: createdSha,
-            sizeBytes: fileBuffer.byteLength,
-            createdAt: nowFa,
-            lastModified: nowFa,
-            source: 'github',
-          };
-
-          // Also record in D1 if available
-          if (env.DB) {
-            try {
-              await env.DB.prepare(
-                'INSERT INTO media_assets (id, filename, file_type, mime_type, url, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-              )
-                .bind(newAsset.id, newAsset.filename, newAsset.fileType, newAsset.mimeType, newAsset.url, newAsset.sizeBytes, nowFa)
-                .run();
-            } catch {
-              // ignore D1 insert error
-            }
-          }
-
-          return new Response(JSON.stringify({ success: true, asset: newAsset }), {
-            status: 201,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
+        // Step 1: Check if file already exists in GitHub to retrieve existing SHA
+        const checkRes = await fetchFromGitHubContents(fullRepoPath, env);
+        let existingSha: string | undefined;
+        if (checkRes.ok && checkRes.data && checkRes.data.sha) {
+          existingSha = checkRes.data.sha;
         }
 
-        // Fallback for Local/Mock environment without token
+        // Step 2: PUT file to GitHub Contents API
+        const putRes = await fetchFromGitHubContents(fullRepoPath, env, {
+          method: 'PUT',
+          body: {
+            message: `Upload media asset: ${safeName} via Admin Media Manager`,
+            content: base64Content,
+            branch,
+            ...(existingSha ? { sha: existingSha } : {}),
+          },
+        });
+
+        if (!putRes.ok) {
+          return new Response(
+            JSON.stringify({
+              error: `خطا در ثبت فایل در مخزن گیت‌هاب: ${putRes.data?.message || 'نامشخص'}`,
+              details: putRes.data,
+            }),
+            { status: putRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        // Step 3: Verification - GET GitHub contents again to verify that the file actually exists
+        const verifyRes = await fetchFromGitHubContents(fullRepoPath, env);
+        if (!verifyRes.ok || !verifyRes.data) {
+          return new Response(
+            JSON.stringify({ error: 'فایل به گیت‌هاب ارسال شد اما در اعتبارسنجی نهایی مخزن یافت نشد.' }),
+            { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        const verifiedFile = verifyRes.data;
+        const createdSha = verifiedFile.sha || putRes.data?.content?.sha || existingSha || 'sha-verified';
         const cleanUrl = `/${fullRepoPath.replace(/^public\//, '')}`;
+        const rawUrl =
+          verifiedFile.download_url ||
+          `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${fullRepoPath}`;
+
         const newAsset = {
-          id: `local-${Date.now()}-${safeName}`,
+          id: `gh-${createdSha.slice(0, 10)}-${safeName}`,
           filename: safeName,
           fileType: validation.fileType || 'image',
           mimeType: validation.mimeType || 'application/octet-stream',
           url: cleanUrl,
-          rawUrl: cleanUrl,
+          rawUrl,
           path: fullRepoPath,
-          sizeBytes: fileBuffer.byteLength,
+          sha: createdSha,
+          sizeBytes: verifiedFile.size || fileBuffer.byteLength,
           createdAt: nowFa,
           lastModified: nowFa,
-          source: 'local',
+          source: 'github',
         };
-        memoryStore.media.unshift(newAsset);
 
-        return new Response(JSON.stringify({ success: true, asset: newAsset, localFallback: true }), {
+        // Also record in D1 if available
+        if (env.DB) {
+          try {
+            await env.DB.prepare(
+              'INSERT INTO media_assets (id, filename, file_type, mime_type, url, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            )
+              .bind(newAsset.id, newAsset.filename, newAsset.fileType, newAsset.mimeType, newAsset.url, newAsset.sizeBytes, nowFa)
+              .run();
+          } catch {
+            // ignore D1 insert error
+          }
+        }
+
+        return new Response(JSON.stringify({ success: true, asset: newAsset }), {
           status: 201,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -1417,6 +1414,17 @@ export default {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
           });
+        }
+
+        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+        if (!hasToken) {
+          return new Response(
+            JSON.stringify({
+              error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) تنظیم نشده است.',
+              code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
         }
 
         const body = (await request.json()) as {
@@ -1475,103 +1483,75 @@ export default {
           });
         }
 
-        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
-        const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
-        const repo = env.GITHUB_REPO_NAME || 'dance';
+        const owner = env.GITHUB_REPO_OWNER || 'siralinamdarbinanc-byte';
+        const repo = env.GITHUB_REPO_NAME || 'DANCE';
         const branch = env.GITHUB_BRANCH || 'main';
         const nowFa = new Date().toLocaleDateString('fa-IR');
 
-        if (hasToken) {
-          // 1. Get old file content and sha
-          const oldFileRes = await fetchFromGitHubContents(oldValidation.normalizedPath, env);
-          if (!oldFileRes.ok || !oldFileRes.data || !oldFileRes.data.content) {
-            return new Response(
-              JSON.stringify({ error: 'فایل اصلی در مخزن گیت‌هاب یافت نشد یا دسترسی به آن امکان‌پذیر نیست.' }),
-              { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-            );
-          }
-
-          const oldSha = oldFileRes.data.sha;
-          const oldBase64Content = oldFileRes.data.content.replace(/\n/g, '');
-
-          // 2. Put new file with old content
-          const createRes = await fetchFromGitHubContents(fullNewPath, env, {
-            method: 'PUT',
-            body: {
-              message: `Rename media from ${oldValidation.filename} to ${safeNewFilename} via Admin Media Manager`,
-              content: oldBase64Content,
-              branch,
-            },
-          });
-
-          if (!createRes.ok) {
-            return new Response(
-              JSON.stringify({ error: `خطا در ایجاد فایل با نام جدید: ${createRes.data?.message || 'نامشخص'}` }),
-              { status: createRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-            );
-          }
-
-          // 3. Delete old file
-          await fetchFromGitHubContents(oldValidation.normalizedPath, env, {
-            method: 'DELETE',
-            body: {
-              message: `Remove old file after rename: ${oldValidation.filename}`,
-              sha: oldSha,
-              branch,
-            },
-          });
-
-          const cleanUrl = `/${fullNewPath.replace(/^public\//, '')}`;
-          const rawUrl =
-            createRes.data?.content?.download_url ||
-            `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${fullNewPath}`;
-
-          const updatedAsset = {
-            id: `gh-${createRes.data?.content?.sha?.slice(0, 10) || Date.now()}-${safeNewFilename}`,
-            filename: safeNewFilename,
-            fileType: newValidation.fileType || 'image',
-            mimeType: newValidation.mimeType || 'application/octet-stream',
-            url: cleanUrl,
-            rawUrl,
-            path: fullNewPath,
-            sha: createRes.data?.content?.sha,
-            sizeBytes: oldFileRes.data.size || 0,
-            createdAt: nowFa,
-            lastModified: nowFa,
-            source: 'github',
-          };
-
-          return new Response(JSON.stringify({ success: true, asset: updatedAsset }), {
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
+        // 1. Get old file content and sha
+        const oldFileRes = await fetchFromGitHubContents(oldValidation.normalizedPath, env);
+        if (!oldFileRes.ok || !oldFileRes.data || !oldFileRes.data.content) {
+          return new Response(
+            JSON.stringify({ error: 'فایل اصلی در مخزن گیت‌هاب یافت نشد یا دسترسی به آن امکان‌پذیر نیست.' }),
+            { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
         }
 
-        // Memory Store Fallback
-        const matchIdx = memoryStore.media.findIndex(
-          (m) => m.path === oldValidation.normalizedPath || m.filename === oldValidation.filename
-        );
+        const oldSha = oldFileRes.data.sha;
+        const oldBase64Content = oldFileRes.data.content.replace(/\n/g, '');
+
+        // 2. Put new file with old content
+        const createRes = await fetchFromGitHubContents(fullNewPath, env, {
+          method: 'PUT',
+          body: {
+            message: `Rename media from ${oldValidation.filename} to ${safeNewFilename} via Admin Media Manager`,
+            content: oldBase64Content,
+            branch,
+          },
+        });
+
+        if (!createRes.ok) {
+          return new Response(
+            JSON.stringify({ error: `خطا در ایجاد فایل با نام جدید: ${createRes.data?.message || 'نامشخص'}` }),
+            { status: createRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        // 3. Delete old file
+        await fetchFromGitHubContents(oldValidation.normalizedPath, env, {
+          method: 'DELETE',
+          body: {
+            message: `Remove old file after rename: ${oldValidation.filename}`,
+            sha: oldSha,
+            branch,
+          },
+        });
+
+        // 4. Verify new file exists
+        const verifyRes = await fetchFromGitHubContents(fullNewPath, env);
+        const finalFile = verifyRes.ok && verifyRes.data ? verifyRes.data : createRes.data?.content;
+
         const cleanUrl = `/${fullNewPath.replace(/^public\//, '')}`;
+        const rawUrl =
+          finalFile?.download_url ||
+          `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${fullNewPath}`;
+
         const updatedAsset = {
-          id: `local-${Date.now()}-${safeNewFilename}`,
+          id: `gh-${finalFile?.sha?.slice(0, 10) || Date.now()}-${safeNewFilename}`,
           filename: safeNewFilename,
           fileType: newValidation.fileType || 'image',
           mimeType: newValidation.mimeType || 'application/octet-stream',
           url: cleanUrl,
-          rawUrl: cleanUrl,
+          rawUrl,
           path: fullNewPath,
-          sizeBytes: matchIdx >= 0 ? memoryStore.media[matchIdx].sizeBytes : 100000,
+          sha: finalFile?.sha,
+          sizeBytes: oldFileRes.data.size || 0,
           createdAt: nowFa,
           lastModified: nowFa,
-          source: 'local',
+          source: 'github',
         };
 
-        if (matchIdx >= 0) {
-          memoryStore.media[matchIdx] = updatedAsset;
-        } else {
-          memoryStore.media.unshift(updatedAsset);
-        }
-
-        return new Response(JSON.stringify({ success: true, asset: updatedAsset, localFallback: true }), {
+        return new Response(JSON.stringify({ success: true, asset: updatedAsset }), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }
@@ -1637,33 +1617,41 @@ export default {
         }
 
         const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+        if (!hasToken) {
+          return new Response(
+            JSON.stringify({
+              error: 'کلید دسترسی گیت‌هاب (GITHUB_TOKEN) تنظیم نشده است.',
+              code: 'GITHUB_TOKEN_NOT_CONFIGURED',
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
         const branch = env.GITHUB_BRANCH || 'main';
 
-        if (hasToken) {
-          // If SHA not provided by client, query file info from GitHub first
-          if (!sha) {
-            const fileInfo = await fetchFromGitHubContents(validation.normalizedPath, env);
-            if (fileInfo.ok && fileInfo.data?.sha) {
-              sha = fileInfo.data.sha;
-            }
+        // If SHA not provided by client, query file info from GitHub first
+        if (!sha) {
+          const fileInfo = await fetchFromGitHubContents(validation.normalizedPath, env);
+          if (fileInfo.ok && fileInfo.data?.sha) {
+            sha = fileInfo.data.sha;
           }
+        }
 
-          if (sha) {
-            const deleteRes = await fetchFromGitHubContents(validation.normalizedPath, env, {
-              method: 'DELETE',
-              body: {
-                message: `Delete media: ${validation.filename} via Admin Media Manager`,
-                sha,
-                branch,
-              },
-            });
+        if (sha) {
+          const deleteRes = await fetchFromGitHubContents(validation.normalizedPath, env, {
+            method: 'DELETE',
+            body: {
+              message: `Delete media: ${validation.filename} via Admin Media Manager`,
+              sha,
+              branch,
+            },
+          });
 
-            if (!deleteRes.ok && deleteRes.status !== 404) {
-              return new Response(
-                JSON.stringify({ error: `خطا در حذف فایل از گیت‌هاب: ${deleteRes.data?.message || 'نامشخص'}` }),
-                { status: deleteRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-              );
-            }
+          if (!deleteRes.ok && deleteRes.status !== 404) {
+            return new Response(
+              JSON.stringify({ error: `خطا در حذف فایل از گیت‌هاب: ${deleteRes.data?.message || 'نامشخص'}` }),
+              { status: deleteRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
           }
         }
 

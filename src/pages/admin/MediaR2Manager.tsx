@@ -55,8 +55,8 @@ export const MediaR2Manager: React.FC<MediaR2ManagerProps> = ({ onNotify }) => {
     maxSizeBytes: number;
   }>({
     githubConfigured: false,
-    owner: 'aliinndd',
-    repo: 'dance',
+    owner: 'siralinamdarbinanc-byte',
+    repo: 'DANCE',
     branch: 'main',
     directories: ['public/images', 'public/audio', 'public/videos'],
     maxSizeBytes: 104857600,
