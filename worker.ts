@@ -68,18 +68,243 @@ const memoryStore = {
   ] as any[],
 };
 
-// Helper: Verify Admin Authentication Token
-function isAuthorized(request: Request, env: Env): boolean {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+// ===========================================================================
+// CRYPTOGRAPHY & AUTHENTICATION HELPERS (Web Crypto API Native)
+// ===========================================================================
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const saltHex = Array.from(salt)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  const iterations = 100000;
+
+  const enc = new TextEncoder();
+  const passwordKey = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations,
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    256
+  );
+
+  const hashHex = Array.from(new Uint8Array(derivedBits))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  return `pbkdf2$${iterations}$${saltHex}$${hashHex}`;
+}
+
+export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  try {
+    const parts = storedHash.split('$');
+    if (parts.length !== 4 || parts[0] !== 'pbkdf2') {
+      return false;
+    }
+    const iterations = parseInt(parts[1], 10);
+    const saltHex = parts[2];
+    const originalHashHex = parts[3];
+
+    if (isNaN(iterations) || !saltHex || !originalHashHex) {
+      return false;
+    }
+
+    const salt = new Uint8Array(
+      saltHex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
+    );
+
+    const enc = new TextEncoder();
+    const passwordKey = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(password),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits']
+    );
+
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations,
+        hash: 'SHA-256',
+      },
+      passwordKey,
+      256
+    );
+
+    const derivedBytes = new Uint8Array(derivedBits);
+    const originalBytes = new Uint8Array(
+      originalHashHex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
+    );
+
+    if (derivedBytes.length !== originalBytes.length) {
+      return false;
+    }
+
+    let diff = 0;
+    for (let i = 0; i < derivedBytes.length; i++) {
+      diff |= derivedBytes[i] ^ originalBytes[i];
+    }
+    return diff === 0;
+  } catch {
     return false;
   }
-  const token = authHeader.replace('Bearer ', '').trim();
-  // Valid token checks
-  if (token.length > 8 && (token.includes('jwt') || token.includes('session') || token.includes('admin'))) {
-    return true;
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
-  return false;
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function base64UrlDecode(str: string): Uint8Array {
+  let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) {
+    base64 += '=';
+  }
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function stringToBase64Url(str: string): string {
+  return base64UrlEncode(new TextEncoder().encode(str));
+}
+
+function base64UrlToString(str: string): string {
+  return new TextDecoder().decode(base64UrlDecode(str));
+}
+
+export async function signJwt(payload: Record<string, any>, secret: string): Promise<string> {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const encodedHeader = stringToBase64Url(JSON.stringify(header));
+  const encodedPayload = stringToBase64Url(JSON.stringify(payload));
+  const dataToSign = `${encodedHeader}.${encodedPayload}`;
+
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signature = await crypto.subtle.sign('HMAC', key, enc.encode(dataToSign));
+  const encodedSignature = base64UrlEncode(new Uint8Array(signature));
+
+  return `${dataToSign}.${encodedSignature}`;
+}
+
+export async function verifyJwt(
+  token: string,
+  secret: string
+): Promise<{ valid: boolean; payload?: any }> {
+  try {
+    if (!token || !secret) {
+      return { valid: false };
+    }
+
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return { valid: false };
+    }
+
+    const [encodedHeader, encodedPayload, encodedSignature] = parts;
+
+    const headerStr = base64UrlToString(encodedHeader);
+    const header = JSON.parse(headerStr);
+    if (header.alg !== 'HS256' || header.typ !== 'JWT') {
+      return { valid: false };
+    }
+
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+
+    const dataToVerify = enc.encode(`${encodedHeader}.${encodedPayload}`);
+    const signatureBytes = base64UrlDecode(encodedSignature);
+
+    const isValid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      signatureBytes,
+      dataToVerify
+    );
+
+    if (!isValid) {
+      return { valid: false };
+    }
+
+    const payloadStr = base64UrlToString(encodedPayload);
+    const payload = JSON.parse(payloadStr);
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    if (
+      typeof payload.exp !== 'number' ||
+      nowSeconds >= payload.exp
+    ) {
+      return { valid: false };
+    }
+
+    return { valid: true, payload };
+  } catch {
+    return { valid: false };
+  }
+}
+
+// Helper: Verify Admin Authentication Token from Request Header
+async function isAuthorized(
+  request: Request,
+  env: Env
+): Promise<{ authorized: boolean; payload?: any }> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { authorized: false };
+  }
+
+  const token = authHeader.replace('Bearer ', '').trim();
+  if (!token) {
+    return { authorized: false };
+  }
+
+  const secret = env.JWT_SECRET;
+  if (!secret) {
+    return { authorized: false };
+  }
+
+  const result = await verifyJwt(token, secret);
+  if (!result.valid || !result.payload) {
+    return { authorized: false };
+  }
+
+  return { authorized: true, payload: result.payload };
 }
 
 export default {
@@ -116,33 +341,96 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // 2. AUTHENTICATION & SECURITY
+      // 2. AUTHENTICATION & SECURITY (D1 admin_users & Real JWT)
       // -------------------------------------------------------------
       if (url.pathname === '/api/auth/login' && request.method === 'POST') {
-        const body = (await request.json()) as { username?: string; password?: string };
-        const pass = body.password?.trim();
-        if (pass === 'admin' || pass === 'admin1234' || pass === '123456') {
-          const token = 'cf-worker-session-jwt-token-' + Date.now();
+        if (!env.JWT_SECRET) {
           return new Response(
             JSON.stringify({
-              success: true,
-              token,
-              user: { username: 'admin', role: 'SUPER_ADMIN' },
+              success: false,
+              error: 'تنظیمات امنیتی سرور ناقص است (JWT_SECRET تعریف نشده است).',
             }),
-            { headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
           );
         }
+
+        const body = (await request.json()) as { username?: string; password?: string };
+        const username = body.username?.trim();
+        const password = body.password;
+
+        if (!username || !password) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'نام کاربری و رمز عبور الزامی است.' }),
+            { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        let adminUser: { id: string; username: string; password_hash: string } | null = null;
+
+        if (env.DB) {
+          adminUser = await env.DB.prepare(
+            'SELECT id, username, password_hash FROM admin_users WHERE username = ? LIMIT 1'
+          )
+            .bind(username)
+            .first<{ id: string; username: string; password_hash: string }>();
+        }
+
+        if (!adminUser || !adminUser.password_hash) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' }),
+            { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        const isPasswordValid = await verifyPassword(password, adminUser.password_hash);
+        if (!isPasswordValid) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' }),
+            { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const expSeconds = nowSeconds + 24 * 60 * 60; // 24 hours valid session
+
+        const token = await signJwt(
+          {
+            sub: adminUser.id,
+            username: adminUser.username,
+            role: 'SUPER_ADMIN',
+            iat: nowSeconds,
+            exp: expSeconds,
+          },
+          env.JWT_SECRET
+        );
+
         return new Response(
-          JSON.stringify({ success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' }),
-          { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          JSON.stringify({
+            success: true,
+            token,
+            user: {
+              username: adminUser.username,
+              role: 'SUPER_ADMIN',
+            },
+          }),
+          { headers: { 'Content-Type': 'application/json', ...corsHeaders } }
         );
       }
 
       if (url.pathname === '/api/auth/verify' && request.method === 'GET') {
-        if (isAuthorized(request, env)) {
-          return new Response(JSON.stringify({ success: true, valid: true }), {
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
+        const auth = await isAuthorized(request, env);
+        if (auth.authorized && auth.payload) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              valid: true,
+              user: {
+                username: auth.payload.username,
+                role: auth.payload.role || 'SUPER_ADMIN',
+              },
+            }),
+            { headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
         }
         return new Response(JSON.stringify({ success: false, valid: false }), {
           status: 401,
@@ -242,7 +530,8 @@ export default {
 
       // 3.2 Fetch All Bookings (Admin only protected)
       if (url.pathname === '/api/bookings' && request.method === 'GET') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز. لطفا وارد شوید.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -276,7 +565,8 @@ export default {
       // 3.3 Update Booking Status / Delete (Admin only)
       const bookingStatusMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/status$/);
       if (bookingStatusMatch && request.method === 'PUT') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -301,7 +591,8 @@ export default {
 
       const bookingDeleteMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)$/);
       if (bookingDeleteMatch && request.method === 'DELETE') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -322,7 +613,8 @@ export default {
       // 4. CRM CUSTOMERS & INTERACTIONS (Admin Protected)
       // -------------------------------------------------------------
       if (url.pathname === '/api/crm/customers' && request.method === 'GET') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز به پرونده‌های CRM.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -356,7 +648,8 @@ export default {
 
       const crmCustomerMatch = url.pathname.match(/^\/api\/crm\/customers\/([^/]+)$/);
       if (crmCustomerMatch && request.method === 'PUT') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -386,7 +679,8 @@ export default {
 
       const interactionsMatch = url.pathname.match(/^\/api\/crm\/customers\/([^/]+)\/interactions$/);
       if (interactionsMatch) {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -476,7 +770,8 @@ export default {
         }
 
         if (request.method === 'POST') {
-          if (!isAuthorized(request, env)) {
+          const auth = await isAuthorized(request, env);
+          if (!auth.authorized) {
             return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
               status: 401,
               headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -546,7 +841,8 @@ export default {
 
       // 6.3 Add Media by External URL (Works directly with D1 even without R2)
       if (url.pathname === '/api/media/add-url' && request.method === 'POST') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -595,7 +891,8 @@ export default {
 
       // 6.4 Upload Media to R2 Bucket (with graceful fallback if R2 is not enabled)
       if (url.pathname === '/api/upload' && request.method === 'POST') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز برای آپلود فایل.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -665,7 +962,8 @@ export default {
       // 6.5 Delete Media
       const deleteMediaMatch = url.pathname.match(/^\/api\/media\/([^/]+)$/);
       if (deleteMediaMatch && request.method === 'DELETE') {
-        if (!isAuthorized(request, env)) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
           return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
             status: 401,
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -703,3 +1001,4 @@ export default {
     }
   },
 };
+
