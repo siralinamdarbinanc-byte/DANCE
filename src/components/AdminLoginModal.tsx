@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, KeyRound, ShieldAlert, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Lock, KeyRound, User, ShieldAlert, CheckCircle2, Loader2 } from 'lucide-react';
 import { api } from '../api/client';
 
 interface AdminLoginModalProps {
@@ -8,27 +8,28 @@ interface AdminLoginModalProps {
 }
 
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ onSuccess, onCancel }) => {
+  const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password) {
-      setError('لطفا رمز عبور مدیریت را وارد کنید.');
+    if (!username.trim() || !password) {
+      setError('لطفاً نام کاربری و رمز عبور را وارد کنید.');
       return;
     }
 
     setLoading(true);
     setError(null);
 
-    const res = await api.loginAdmin(password);
+    const res = await api.loginAdmin(username, password);
     setLoading(false);
 
     if (res.success) {
       onSuccess();
     } else {
-      setError(res.error || 'رمز عبور اشتباه است.');
+      setError(res.error || 'نام کاربری یا رمز عبور اشتباه است.');
     }
   };
 
@@ -46,7 +47,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ onSuccess, onC
               ورود امن به پنل مدیریت DANCE ACADEMY
             </h2>
             <p className="text-xs text-[#c0c8c4] mt-1">
-              جهت مشاهده CRM، رزروها و تنظیمات محتوا رمز عبور را وارد کنید.
+              جهت مشاهده CRM، رزروها و تنظیمات محتوا، نام کاربری و رمز عبور را وارد کنید.
             </p>
           </div>
         </div>
@@ -63,6 +64,24 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ onSuccess, onC
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-[#c0c8c4] mb-1.5">
+              نام کاربری مدیریت:
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="نام کاربری..."
+                className="w-full bg-[#111413] border border-[#e9c349]/30 focus:border-[#e9c349] text-white px-4 py-3 rounded-xl text-sm outline-none pl-10 transition-colors"
+                autoFocus
+                disabled={loading}
+              />
+              <User className="w-4 h-4 text-[#e9c349] absolute left-3 top-3.5" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-[#c0c8c4] mb-1.5">
               رمز عبور مدیریت:
             </label>
             <div className="relative">
@@ -70,32 +89,33 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ onSuccess, onC
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="رمز عبور مدیریت را وارد کنید..."
+                placeholder="رمز عبور..."
                 className="w-full bg-[#111413] border border-[#e9c349]/30 focus:border-[#e9c349] text-white px-4 py-3 rounded-xl text-sm outline-none pl-10 transition-colors"
-                autoFocus
+                disabled={loading}
               />
               <KeyRound className="w-4 h-4 text-[#e9c349] absolute left-3 top-3.5" />
             </div>
-            <p className="text-[11px] text-[#c0c8c4]/70 mt-1">
-              (رمز پیش‌فرض پیش‌نمایش: <code className="text-[#e9c349]">123456</code> یا <code className="text-[#e9c349]">admin</code>)
-            </p>
           </div>
 
           <div className="flex items-center gap-3 pt-2">
             <button
               type="button"
               onClick={onCancel}
-              className="flex-1 py-3 bg-[#111413] hover:bg-white/5 border border-white/10 text-[#c0c8c4] text-xs font-bold rounded-xl cursor-pointer transition-colors"
+              disabled={loading}
+              className="flex-1 py-3 bg-[#111413] hover:bg-white/5 border border-white/10 text-[#c0c8c4] text-xs font-bold rounded-xl cursor-pointer transition-colors disabled:opacity-50"
             >
               انصراف
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 py-3 bg-gradient-to-r from-[#e9c349] to-[#c9a329] text-[#111413] font-bold text-xs rounded-xl hover:brightness-110 shadow-lg cursor-pointer transition-all flex items-center justify-center gap-1.5"
+              className="flex-1 py-3 bg-gradient-to-r from-[#e9c349] to-[#c9a329] text-[#111413] font-bold text-xs rounded-xl hover:brightness-110 shadow-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
             >
               {loading ? (
-                <span>در حال بررسی...</span>
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>در حال بررسی...</span>
+                </>
               ) : (
                 <>
                   <span>ورود به پنل</span>

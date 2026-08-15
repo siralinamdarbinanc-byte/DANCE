@@ -39,6 +39,7 @@ import { SoloDanceEditor } from './SoloDanceEditor';
 import { MusicEditor } from './MusicEditor';
 import { MediaR2Manager } from './MediaR2Manager';
 import { AdminLoginModal } from '../../components/AdminLoginModal';
+import { api } from '../../api/client';
 
 interface AdminPageProps {
   onNavigateSite: (page: NavigationPage) => void;
@@ -51,11 +52,36 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return !!sessionStorage.getItem('admin_auth_token');
+    return !!localStorage.getItem('admin_auth_token');
+  });
+  const [isVerifying, setIsVerifying] = useState<boolean>(() => {
+    return !!localStorage.getItem('admin_auth_token');
   });
 
   useModalBackHandler(mobileMenuOpen, () => setMobileMenuOpen(false), 'adminMobileMenu');
   useModalBackHandler(showResetModal, () => setShowResetModal(false), 'adminResetModal');
+
+  useEffect(() => {
+    const verifySession = async () => {
+      const token = localStorage.getItem('admin_auth_token');
+      if (!token) {
+        setIsAuthenticated(false);
+        setIsVerifying(false);
+        return;
+      }
+
+      const isValid = await api.verifyAuth();
+      if (!isValid) {
+        localStorage.removeItem('admin_auth_token');
+        setIsAuthenticated(false);
+      } else {
+        setIsAuthenticated(true);
+      }
+      setIsVerifying(false);
+    };
+
+    verifySession();
+  }, []);
 
   const notify = (msg: string) => {
     setToastMessage(msg);
@@ -71,7 +97,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem('admin_auth_token');
+    localStorage.removeItem('admin_auth_token');
     setIsAuthenticated(false);
     notify('با موفقیت از پنل مدیریت خارج شدید.');
   };
@@ -93,12 +119,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigateSite }) => {
     { id: 'settings', label: 'تنظیمات و تماس', icon: Settings },
   ];
 
+  if (isVerifying) {
+    return (
+      <div className="w-full min-h-screen bg-[#0c0f0e] flex flex-col items-center justify-center p-4 text-[#e2e3e0]">
+        <div className="p-4 bg-[#063b2f] border border-[#e9c349]/40 rounded-2xl text-[#e9c349] shadow-lg shadow-[#063b2f]/50 animate-pulse mb-4">
+          <ShieldCheck className="w-8 h-8" />
+        </div>
+        <p className="text-sm font-medium text-[#c0c8c4]">در حال بررسی اعتبار دسترسی مدیریت...</p>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="w-full min-h-screen bg-[#0c0f0e] flex items-center justify-center p-4">
         <AdminLoginModal
           onSuccess={() => {
             setIsAuthenticated(true);
+            setIsVerifying(false);
             notify('ورود به پنل مدیریت با موفقیت انجام شد.');
           }}
           onCancel={() => onNavigateSite('home')}

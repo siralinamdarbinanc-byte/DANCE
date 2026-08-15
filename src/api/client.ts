@@ -1,10 +1,24 @@
 import { BookingRequest, BookingStatus, CentralAcademyContent, CrmCustomer, CrmInteraction, MediaAsset } from '../types';
 
-const API_BASE = '/api';
+const WORKER_BASE_URL = 'https://dance.sir-alinamdar-binanc.workers.dev';
 
-// Helper for authorized headers
+// Automatically resolve API URL:
+// When running on GitHub Pages (github.io) or if custom API URL is set, direct requests to Cloudflare Worker backend.
+// In local dev/proxy environments, default to /api or VITE_API_URL.
+const getApiBaseUrl = (): string => {
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname.includes('github.io')) {
+      return `${WORKER_BASE_URL}/api`;
+    }
+  }
+  return ((import.meta as any).env?.VITE_API_URL as string) || '/api';
+};
+
+const API_BASE = getApiBaseUrl();
+
+// Helper for authorized headers using JWT stored in localStorage
 const getHeaders = () => {
-  const token = sessionStorage.getItem('admin_auth_token');
+  const token = typeof window !== 'undefined' ? localStorage.getItem('admin_auth_token') : null;
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -13,40 +27,52 @@ const getHeaders = () => {
 
 export const api = {
   // Auth API
-  async loginAdmin(password: string): Promise<{ success: boolean; token?: string; error?: string }> {
+  async loginAdmin(username: string, password: string): Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
-      const data = await res.json();
-      if (res.ok && data.token) {
-        sessionStorage.setItem('admin_auth_token', data.token);
-        return { success: true, token: data.token };
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data && data.success && data.token) {
+        localStorage.setItem('admin_auth_token', data.token);
+        return { success: true, token: data.token, user: data.user };
       }
-      return { success: false, error: data.error || 'رمز عبور نامعتبر است' };
+
+      if (res.status === 401) {
+        return { success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' };
+      }
+
+      return { success: false, error: (data && data.error) || 'نام کاربری یا رمز عبور اشتباه است.' };
     } catch (e) {
-      // Local fallback for dev/demo mode
-      if (password === 'admin' || password === '123456' || password === 'admin1234') {
-        const dummyToken = 'local_admin_session_token_' + Date.now();
-        sessionStorage.setItem('admin_auth_token', dummyToken);
-        return { success: true, token: dummyToken };
-      }
-      return { success: false, error: 'خطا در ارتباط با سرور احراز هویت' };
+      console.error('Login network error:', e);
+      return { success: false, error: 'ارتباط با سرور برقرار نشد.' };
     }
   },
 
   async verifyAuth(): Promise<boolean> {
-    const token = sessionStorage.getItem('admin_auth_token');
+    const token = typeof window !== 'undefined' ? localStorage.getItem('admin_auth_token') : null;
     if (!token) return false;
     try {
       const res = await fetch(`${API_BASE}/auth/verify`, {
         headers: getHeaders(),
       });
-      return res.ok;
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.valid) {
+          return true;
+        }
+      }
+      // If token is invalid or expired, remove it
+      localStorage.removeItem('admin_auth_token');
+      return false;
     } catch (e) {
-      return true;
+      console.warn('API verifyAuth network error:', e);
+      localStorage.removeItem('admin_auth_token');
+      return false;
     }
   },
 
@@ -231,7 +257,7 @@ export const api = {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const token = sessionStorage.getItem('admin_auth_token');
+      const token = typeof window !== 'undefined' ? localStorage.getItem('admin_auth_token') : null;
 
       const res = await fetch(`${API_BASE}/upload`, {
         method: 'POST',
