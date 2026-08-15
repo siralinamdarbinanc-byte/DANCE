@@ -27,4 +27,9 @@ database_id = "4bdeeea2-bb10-489e-99b3-51bf78d9b096"
 [vars]
 ENVIRONMENT = "production"
 JWT_SECRET = "dance_academy_secret_jwt_key_2026"
+GITHUB_REPO_OWNER = "aliinndd"
+GITHUB_REPO_NAME = "dance"
+GITHUB_BRANCH = "main"
+# Note: GITHUB_TOKEN should be configured securely as a secret:
+# npx wrangler secret put GITHUB_TOKEN
 

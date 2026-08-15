@@ -34,6 +34,10 @@ export interface Env {
   ASSETS?: Fetcher;
   ENVIRONMENT?: string;
   JWT_SECRET?: string;
+  GITHUB_TOKEN?: string;
+  GITHUB_REPO_OWNER?: string;
+  GITHUB_REPO_NAME?: string;
+  GITHUB_BRANCH?: string;
 }
 
 // In-Memory Fallbacks for instances where D1/R2 is not bound during local test
@@ -48,30 +52,189 @@ const memoryStore = {
       filename: 'tango_masterclass_banner.jpg',
       fileType: 'image',
       mimeType: 'image/jpeg',
-      url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+      url: '/images/tango_masterclass_banner.jpg',
+      rawUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+      path: 'public/images/tango_masterclass_banner.jpg',
       sizeBytes: 420000,
       createdAt: '1403/05/20',
+      lastModified: '1403/05/20',
+      source: 'local',
     },
     {
       id: 'r2-media-2',
       filename: 'wedding_valse_golden_edit.mp3',
       fileType: 'audio',
       mimeType: 'audio/mpeg',
-      url: 'https://cdn.freesound.org/previews/530/530415_1648170-lq.mp3',
+      url: '/audio/wedding_valse_golden_edit.mp3',
+      rawUrl: 'https://cdn.freesound.org/previews/530/530415_1648170-lq.mp3',
+      path: 'public/audio/wedding_valse_golden_edit.mp3',
       sizeBytes: 3800000,
       createdAt: '1403/05/22',
+      lastModified: '1403/05/22',
+      source: 'local',
     },
     {
       id: 'r2-media-3',
       filename: 'bride_solo_entrance_preview.mp4',
       fileType: 'video',
       mimeType: 'video/mp4',
-      url: 'https://assets.mixkit.co/videos/preview/mixkit-bride-walking-down-the-aisle-41716-large.mp4',
+      url: '/videos/bride_solo_entrance_preview.mp4',
+      rawUrl: 'https://assets.mixkit.co/videos/preview/mixkit-bride-walking-down-the-aisle-41716-large.mp4',
+      path: 'public/videos/bride_solo_entrance_preview.mp4',
       sizeBytes: 12400000,
       createdAt: '1403/05/24',
+      lastModified: '1403/05/24',
+      source: 'local',
     },
   ] as any[],
 };
+
+// ===========================================================================
+// GITHUB CONTENTS API HELPERS & STRICT PATH VALIDATION
+// ===========================================================================
+const ALLOWED_DIRECTORIES = ['public/images', 'public/audio', 'public/videos'] as const;
+
+const ALLOWED_EXTENSIONS: Record<'image' | 'audio' | 'video', string[]> = {
+  image: ['.jpg', '.jpeg', '.png', '.webp'],
+  audio: ['.mp3', '.wav', '.m4a'],
+  video: ['.mp4', '.webm', '.mov'],
+};
+
+const MIME_MAP: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+};
+
+const MAX_MEDIA_SIZE_BYTES = 100 * 1024 * 1024; // 100MB strictly enforced
+
+function sanitizeAndValidateMediaPath(rawPath: string): {
+  valid: boolean;
+  error?: string;
+  normalizedPath?: string;
+  folder?: (typeof ALLOWED_DIRECTORIES)[number];
+  fileType?: 'image' | 'audio' | 'video';
+  mimeType?: string;
+  filename?: string;
+} {
+  if (!rawPath || typeof rawPath !== 'string') {
+    return { valid: false, error: 'مسیر فایل نامعتبر است.' };
+  }
+
+  const decoded = decodeURIComponent(rawPath).trim();
+  // Reject traversal patterns and forbidden control characters
+  if (
+    decoded.includes('..') ||
+    decoded.includes('\\') ||
+    decoded.includes('//') ||
+    /[\x00-\x1f\x7f]/.test(decoded)
+  ) {
+    return { valid: false, error: 'مسیر حاوی کاراکترهای غیرمجاز یا تلاش برای Path Traversal است.' };
+  }
+
+  // Normalize: remove leading slashes
+  let path = decoded.replace(/^\/+/, '');
+
+  // Auto-prefix public/ if needed
+  if (path.startsWith('images/') || path.startsWith('audio/') || path.startsWith('videos/')) {
+    path = `public/${path}`;
+  }
+
+  const matchingFolder = ALLOWED_DIRECTORIES.find((dir) => path === dir || path.startsWith(`${dir}/`));
+  if (!matchingFolder) {
+    return {
+      valid: false,
+      error: 'مسیر نامعتبر است. فقط پوشه‌های public/images, public/audio و public/videos مجاز هستند.',
+    };
+  }
+
+  const filename = path.split('/').pop() || '';
+  if (!filename || filename === matchingFolder.split('/').pop()) {
+    return { valid: true, normalizedPath: path, folder: matchingFolder };
+  }
+
+  const extMatch = filename.match(/\.([a-zA-Z0-9]+)$/);
+  if (!extMatch) {
+    return { valid: false, error: 'فایل باید دارای پسوند معتبر باشد.' };
+  }
+
+  const ext = `.${extMatch[1].toLowerCase()}`;
+  const extKey = extMatch[1].toLowerCase();
+
+  let fileType: 'image' | 'audio' | 'video';
+  if (matchingFolder === 'public/images') {
+    if (!ALLOWED_EXTENSIONS.image.includes(ext)) {
+      return { valid: false, error: `پسوند ${ext} برای تصاویر مجاز نیست. پسوندهای مجاز: jpg, jpeg, png, webp` };
+    }
+    fileType = 'image';
+  } else if (matchingFolder === 'public/audio') {
+    if (!ALLOWED_EXTENSIONS.audio.includes(ext)) {
+      return { valid: false, error: `پسوند ${ext} برای موزیک و صدا مجاز نیست. پسوندهای مجاز: mp3, wav, m4a` };
+    }
+    fileType = 'audio';
+  } else {
+    if (!ALLOWED_EXTENSIONS.video.includes(ext)) {
+      return { valid: false, error: `پسوند ${ext} برای ویدیوها مجاز نیست. پسوندهای مجاز: mp4, webm, mov` };
+    }
+    fileType = 'video';
+  }
+
+  return {
+    valid: true,
+    normalizedPath: path,
+    folder: matchingFolder,
+    fileType,
+    mimeType: MIME_MAP[extKey] || 'application/octet-stream',
+    filename,
+  };
+}
+
+async function fetchFromGitHubContents(
+  endpointPath: string,
+  env: Env,
+  options: { method?: string; body?: any; headers?: Record<string, string> } = {}
+): Promise<{ ok: boolean; status: number; data: any }> {
+  const token = env.GITHUB_TOKEN;
+  if (!token) {
+    return { ok: false, status: 500, data: { error: 'GITHUB_TOKEN_NOT_SET' } };
+  }
+
+  const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
+  const repo = env.GITHUB_REPO_NAME || 'dance';
+  const branch = env.GITHUB_BRANCH || 'main';
+
+  const cleanPath = endpointPath.replace(/^\/+/, '');
+  let url = `https://api.github.com/repos/${owner}/${repo}/contents/${cleanPath}`;
+  if (!options.method || options.method === 'GET') {
+    url += `${url.includes('?') ? '&' : '?'}ref=${encodeURIComponent(branch)}`;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: options.method || 'GET',
+      headers: {
+        Accept: 'application/vnd.github.v3+json',
+        'User-Agent': 'DanceAcademy-CloudflareWorker/1.0',
+        Authorization: `Bearer ${token}`,
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...options.headers,
+      },
+      ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+    });
+
+    const data = await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return { ok: false, status: 500, data: { error: err?.message || 'Network error connecting to GitHub API' } };
+  }
+}
 
 // ===========================================================================
 // CRYPTOGRAPHY & AUTHENTICATION HELPERS (Web Crypto API Native)
@@ -901,49 +1064,630 @@ export default {
       }
 
       // -------------------------------------------------------------
-      // 6. CLOUDFLARE R2 MEDIA STORAGE (OPTIONAL)
+      // 6. GITHUB REPOSITORY MEDIA MANAGER API & R2/D1 INTEGRATION
       // -------------------------------------------------------------
-      // 6.1 Media List
+
+      // 6.0 Media GitHub Status Check
+      if (url.pathname === '/api/media/status' && request.method === 'GET') {
+        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+        return new Response(
+          JSON.stringify({
+            githubConfigured: hasToken,
+            owner: env.GITHUB_REPO_OWNER || 'aliinndd',
+            repo: env.GITHUB_REPO_NAME || 'dance',
+            branch: env.GITHUB_BRANCH || 'main',
+            directories: ALLOWED_DIRECTORIES,
+            maxSizeBytes: MAX_MEDIA_SIZE_BYTES,
+          }),
+          { headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+        );
+      }
+
+      // 6.1 Media List (From GitHub public/images, public/audio, public/videos + D1 sync)
       if (url.pathname === '/api/media' && request.method === 'GET') {
-        if (env.DB) {
-          const results = await env.DB.prepare('SELECT * FROM media_assets ORDER BY created_at DESC').all();
-          const mapped = (results.results || []).map((r: any) => ({
-            id: r.id,
-            filename: r.filename,
-            fileType: r.file_type,
-            mimeType: r.mime_type,
-            url: r.url,
-            sizeBytes: r.size_bytes,
-            createdAt: r.created_at,
-          }));
-          return new Response(JSON.stringify(mapped), {
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        const categoryFilter = url.searchParams.get('category'); // 'image' | 'audio' | 'video'
+        const searchFilter = url.searchParams.get('search')?.toLowerCase().trim();
+
+        let allAssets: any[] = [];
+        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+
+        if (hasToken) {
+          const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
+          const repo = env.GITHUB_REPO_NAME || 'dance';
+          const branch = env.GITHUB_BRANCH || 'main';
+
+          // Query the 3 folders in parallel
+          const folderPromises = ALLOWED_DIRECTORIES.map(async (dir) => {
+            const res = await fetchFromGitHubContents(dir, env);
+            if (!res.ok || !Array.isArray(res.data)) {
+              return [];
+            }
+            return res.data
+              .filter((item: any) => item.type === 'file')
+              .map((file: any) => {
+                const validation = sanitizeAndValidateMediaPath(file.path);
+                const extMatch = file.name.match(/\.([a-zA-Z0-9]+)$/);
+                const ext = extMatch ? extMatch[1].toLowerCase() : '';
+                const fileType = dir === 'public/images' ? 'image' : dir === 'public/audio' ? 'audio' : 'video';
+                const mimeType = MIME_MAP[ext] || (validation.valid && validation.mimeType) || 'application/octet-stream';
+                const cleanUrl = `/${file.path.replace(/^public\//, '')}`;
+                const rawUrl = file.download_url || `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${file.path}`;
+
+                return {
+                  id: `gh-${file.sha?.slice(0, 10) || Date.now()}-${file.name}`,
+                  filename: file.name,
+                  fileType,
+                  mimeType,
+                  url: cleanUrl,
+                  rawUrl,
+                  path: file.path,
+                  sha: file.sha,
+                  sizeBytes: file.size || 0,
+                  createdAt: new Date().toLocaleDateString('fa-IR'),
+                  lastModified: new Date().toLocaleDateString('fa-IR'),
+                  source: 'github',
+                };
+              });
           });
+
+          const results = await Promise.allSettled(folderPromises);
+          for (const result of results) {
+            if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+              allAssets.push(...result.value);
+            }
+          }
         }
-        return new Response(JSON.stringify(memoryStore.media), {
+
+        // Also merge any external URL media from D1 or memory if present
+        if (env.DB) {
+          try {
+            const dbResults = await env.DB.prepare('SELECT * FROM media_assets ORDER BY created_at DESC').all();
+            const d1Mapped = (dbResults.results || []).map((r: any) => ({
+              id: r.id,
+              filename: r.filename,
+              fileType: r.file_type,
+              mimeType: r.mime_type,
+              url: r.url,
+              rawUrl: r.url,
+              path: r.path || '',
+              sizeBytes: r.size_bytes || 0,
+              createdAt: r.created_at,
+              source: 'd1',
+            }));
+            // Merge without duplicates by filename
+            const existingFilenames = new Set(allAssets.map((a) => a.filename));
+            for (const d1Item of d1Mapped) {
+              if (!existingFilenames.has(d1Item.filename)) {
+                allAssets.push(d1Item);
+                existingFilenames.add(d1Item.filename);
+              }
+            }
+          } catch {
+            // DB fallback ignored
+          }
+        } else if (allAssets.length === 0) {
+          allAssets = [...memoryStore.media];
+        }
+
+        // Apply filters
+        if (categoryFilter && ['image', 'audio', 'video'].includes(categoryFilter)) {
+          allAssets = allAssets.filter((a) => a.fileType === categoryFilter);
+        }
+        if (searchFilter) {
+          allAssets = allAssets.filter(
+            (a) =>
+              (a.filename || '').toLowerCase().includes(searchFilter) ||
+              (a.path || '').toLowerCase().includes(searchFilter)
+          );
+        }
+
+        return new Response(JSON.stringify(allAssets), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }
 
-      // 6.2 Raw Media Stream from R2 Bucket (if bound)
-      const rawMediaMatch = url.pathname.match(/^\/api\/media\/raw\/([^/]+)$/);
-      if (rawMediaMatch && request.method === 'GET') {
-        const key = rawMediaMatch[1];
-        if (env.MEDIA_BUCKET) {
-          const object = await env.MEDIA_BUCKET.get(key);
-          if (!object) {
-            return new Response('File Not Found in R2 Bucket', { status: 404, headers: corsHeaders });
-          }
-          const headers = new Headers();
-          object.writeHttpMetadata(headers);
-          headers.set('etag', object.httpEtag);
-          headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-          return new Response(object.body, { headers });
+      // 6.2 Upload Media to GitHub Repository (POST /api/media/upload or /api/upload)
+      if ((url.pathname === '/api/media/upload' || url.pathname === '/api/upload') && request.method === 'POST') {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
+          return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز برای آپلود رسانه.' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
         }
-        return new Response('مخزن R2 فعال نیست (اختیاری)', { status: 404, headers: corsHeaders });
+
+        const contentType = request.headers.get('content-type') || '';
+        let fileBuffer: ArrayBuffer | null = null;
+        let originalName = '';
+        let targetFolder: 'public/images' | 'public/audio' | 'public/videos' = 'public/images';
+        let customFilename = '';
+
+        if (contentType.includes('multipart/form-data')) {
+          const formData = await request.formData();
+          const file = formData.get('file') as File | null;
+          if (!file) {
+            return new Response(JSON.stringify({ error: 'هیچ فایلی برای آپلود انتخاب نشده است.' }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
+
+          if (file.size > MAX_MEDIA_SIZE_BYTES) {
+            return new Response(
+              JSON.stringify({ error: `حجم فایل بیشتر از سقف مجاز ۱۰۰ مگابایت است (${(file.size / 1024 / 1024).toFixed(1)}MB).` }),
+              { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
+          }
+
+          fileBuffer = await file.arrayBuffer();
+          originalName = file.name;
+          const folderParam = formData.get('folder') as string;
+          if (folderParam && ALLOWED_DIRECTORIES.includes(folderParam as any)) {
+            targetFolder = folderParam as any;
+          }
+          customFilename = (formData.get('filename') as string) || '';
+        } else if (contentType.includes('application/json')) {
+          const jsonBody = (await request.json()) as any;
+          if (!jsonBody.contentBase64 || !jsonBody.filename) {
+            return new Response(JSON.stringify({ error: 'محتوای فایل و نام فایل الزامی است.' }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+            });
+          }
+
+          originalName = jsonBody.filename;
+          if (jsonBody.folder && ALLOWED_DIRECTORIES.includes(jsonBody.folder)) {
+            targetFolder = jsonBody.folder;
+          }
+
+          const binaryString = atob(jsonBody.contentBase64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          fileBuffer = bytes.buffer;
+
+          if (fileBuffer.byteLength > MAX_MEDIA_SIZE_BYTES) {
+            return new Response(
+              JSON.stringify({ error: 'حجم فایل بیشتر از سقف مجاز ۱۰۰ مگابایت است.' }),
+              { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
+          }
+        } else {
+          return new Response(JSON.stringify({ error: 'نوع داده ارسالی نامعتبر است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        // Clean and sanitize filename
+        const safeName = (customFilename || originalName)
+          .replace(/[\\/:*?"<>|]/g, '_')
+          .replace(/\s+/g, '_')
+          .trim();
+
+        // Auto-assign appropriate folder based on extension if not explicitly set
+        const extMatch = safeName.match(/\.([a-zA-Z0-9]+)$/);
+        if (!extMatch) {
+          return new Response(JSON.stringify({ error: 'فایل فاقد پسوند مجاز است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+        const ext = `.${extMatch[1].toLowerCase()}`;
+
+        if (ALLOWED_EXTENSIONS.image.includes(ext)) {
+          targetFolder = 'public/images';
+        } else if (ALLOWED_EXTENSIONS.audio.includes(ext)) {
+          targetFolder = 'public/audio';
+        } else if (ALLOWED_EXTENSIONS.video.includes(ext)) {
+          targetFolder = 'public/videos';
+        } else {
+          return new Response(
+            JSON.stringify({
+              error: `پسوند ${ext} پشتیبانی نمی‌شود. پسوندهای مجاز: تصاویر (jpg, jpeg, png, webp) | موزیک (mp3, wav, m4a) | ویدیو (mp4, webm, mov)`,
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+          );
+        }
+
+        const fullRepoPath = `${targetFolder}/${safeName}`;
+        const validation = sanitizeAndValidateMediaPath(fullRepoPath);
+        if (!validation.valid) {
+          return new Response(JSON.stringify({ error: validation.error }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+        const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
+        const repo = env.GITHUB_REPO_NAME || 'dance';
+        const branch = env.GITHUB_BRANCH || 'main';
+        const nowFa = new Date().toLocaleDateString('fa-IR');
+
+        if (hasToken) {
+          // Convert array buffer to base64
+          const uint8Array = new Uint8Array(fileBuffer);
+          let binary = '';
+          const chunkSize = 8192;
+          for (let i = 0; i < uint8Array.length; i += chunkSize) {
+            binary += String.fromCharCode.apply(null, Array.from(uint8Array.subarray(i, i + chunkSize)));
+          }
+          const base64Content = btoa(binary);
+
+          // Check if file already exists in GitHub to retrieve existing SHA
+          const checkRes = await fetchFromGitHubContents(fullRepoPath, env);
+          let existingSha: string | undefined;
+          if (checkRes.ok && checkRes.data && checkRes.data.sha) {
+            existingSha = checkRes.data.sha;
+          }
+
+          const putRes = await fetchFromGitHubContents(fullRepoPath, env, {
+            method: 'PUT',
+            body: {
+              message: `Upload media asset: ${safeName} via Admin Media Manager`,
+              content: base64Content,
+              branch,
+              ...(existingSha ? { sha: existingSha } : {}),
+            },
+          });
+
+          if (!putRes.ok) {
+            return new Response(
+              JSON.stringify({
+                error: `خطا در ثبت فایل در مخزن گیت‌هاب: ${putRes.data?.message || 'نامشخص'}`,
+                details: putRes.data,
+              }),
+              { status: putRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
+          }
+
+          const createdSha = putRes.data?.content?.sha || existingSha || 'sha-latest';
+          const cleanUrl = `/${fullRepoPath.replace(/^public\//, '')}`;
+          const rawUrl =
+            putRes.data?.content?.download_url ||
+            `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${fullRepoPath}`;
+
+          const newAsset = {
+            id: `gh-${createdSha.slice(0, 10)}-${safeName}`,
+            filename: safeName,
+            fileType: validation.fileType || 'image',
+            mimeType: validation.mimeType || 'application/octet-stream',
+            url: cleanUrl,
+            rawUrl,
+            path: fullRepoPath,
+            sha: createdSha,
+            sizeBytes: fileBuffer.byteLength,
+            createdAt: nowFa,
+            lastModified: nowFa,
+            source: 'github',
+          };
+
+          // Also record in D1 if available
+          if (env.DB) {
+            try {
+              await env.DB.prepare(
+                'INSERT INTO media_assets (id, filename, file_type, mime_type, url, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+              )
+                .bind(newAsset.id, newAsset.filename, newAsset.fileType, newAsset.mimeType, newAsset.url, newAsset.sizeBytes, nowFa)
+                .run();
+            } catch {
+              // ignore D1 insert error
+            }
+          }
+
+          return new Response(JSON.stringify({ success: true, asset: newAsset }), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        // Fallback for Local/Mock environment without token
+        const cleanUrl = `/${fullRepoPath.replace(/^public\//, '')}`;
+        const newAsset = {
+          id: `local-${Date.now()}-${safeName}`,
+          filename: safeName,
+          fileType: validation.fileType || 'image',
+          mimeType: validation.mimeType || 'application/octet-stream',
+          url: cleanUrl,
+          rawUrl: cleanUrl,
+          path: fullRepoPath,
+          sizeBytes: fileBuffer.byteLength,
+          createdAt: nowFa,
+          lastModified: nowFa,
+          source: 'local',
+        };
+        memoryStore.media.unshift(newAsset);
+
+        return new Response(JSON.stringify({ success: true, asset: newAsset, localFallback: true }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
       }
 
-      // 6.3 Add Media by External URL (Works directly with D1 even without R2)
+      // 6.3 Rename / Move Media in GitHub Repository (PUT /api/media/rename or PUT /api/media)
+      if (
+        (url.pathname === '/api/media/rename' || url.pathname === '/api/media' || url.pathname.startsWith('/api/media/')) &&
+        request.method === 'PUT'
+      ) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
+          return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const body = (await request.json()) as {
+          oldPath?: string;
+          newFilename?: string;
+          newPath?: string;
+          targetFolder?: string;
+        };
+
+        const oldPathRaw = body.oldPath || url.pathname.replace(/^\/api\/media\/?/, '');
+        if (!oldPathRaw) {
+          return new Response(JSON.stringify({ error: 'مسیر فعلی فایل مشخص نشده است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const oldValidation = sanitizeAndValidateMediaPath(oldPathRaw);
+        if (!oldValidation.valid || !oldValidation.normalizedPath) {
+          return new Response(JSON.stringify({ error: oldValidation.error || 'مسیر فعلی نامعتبر است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        let newTargetFolder = oldValidation.folder || 'public/images';
+        if (body.targetFolder && ALLOWED_DIRECTORIES.includes(body.targetFolder as any)) {
+          newTargetFolder = body.targetFolder as any;
+        }
+
+        let newFilename = body.newFilename || '';
+        if (body.newPath) {
+          newFilename = body.newPath.split('/').pop() || '';
+        }
+        if (!newFilename) {
+          return new Response(JSON.stringify({ error: 'نام جدید فایل الزامی است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        // Preserve or validate extension
+        const oldExt = oldValidation.filename?.match(/\.[a-zA-Z0-9]+$/)?.[0] || '';
+        if (!newFilename.includes('.') && oldExt) {
+          newFilename += oldExt;
+        }
+
+        const safeNewFilename = newFilename.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').trim();
+        const fullNewPath = `${newTargetFolder}/${safeNewFilename}`;
+
+        const newValidation = sanitizeAndValidateMediaPath(fullNewPath);
+        if (!newValidation.valid || !newValidation.normalizedPath) {
+          return new Response(JSON.stringify({ error: newValidation.error || 'نام یا پسوند جدید نامعتبر است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+        const owner = env.GITHUB_REPO_OWNER || 'aliinndd';
+        const repo = env.GITHUB_REPO_NAME || 'dance';
+        const branch = env.GITHUB_BRANCH || 'main';
+        const nowFa = new Date().toLocaleDateString('fa-IR');
+
+        if (hasToken) {
+          // 1. Get old file content and sha
+          const oldFileRes = await fetchFromGitHubContents(oldValidation.normalizedPath, env);
+          if (!oldFileRes.ok || !oldFileRes.data || !oldFileRes.data.content) {
+            return new Response(
+              JSON.stringify({ error: 'فایل اصلی در مخزن گیت‌هاب یافت نشد یا دسترسی به آن امکان‌پذیر نیست.' }),
+              { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
+          }
+
+          const oldSha = oldFileRes.data.sha;
+          const oldBase64Content = oldFileRes.data.content.replace(/\n/g, '');
+
+          // 2. Put new file with old content
+          const createRes = await fetchFromGitHubContents(fullNewPath, env, {
+            method: 'PUT',
+            body: {
+              message: `Rename media from ${oldValidation.filename} to ${safeNewFilename} via Admin Media Manager`,
+              content: oldBase64Content,
+              branch,
+            },
+          });
+
+          if (!createRes.ok) {
+            return new Response(
+              JSON.stringify({ error: `خطا در ایجاد فایل با نام جدید: ${createRes.data?.message || 'نامشخص'}` }),
+              { status: createRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
+          }
+
+          // 3. Delete old file
+          await fetchFromGitHubContents(oldValidation.normalizedPath, env, {
+            method: 'DELETE',
+            body: {
+              message: `Remove old file after rename: ${oldValidation.filename}`,
+              sha: oldSha,
+              branch,
+            },
+          });
+
+          const cleanUrl = `/${fullNewPath.replace(/^public\//, '')}`;
+          const rawUrl =
+            createRes.data?.content?.download_url ||
+            `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${fullNewPath}`;
+
+          const updatedAsset = {
+            id: `gh-${createRes.data?.content?.sha?.slice(0, 10) || Date.now()}-${safeNewFilename}`,
+            filename: safeNewFilename,
+            fileType: newValidation.fileType || 'image',
+            mimeType: newValidation.mimeType || 'application/octet-stream',
+            url: cleanUrl,
+            rawUrl,
+            path: fullNewPath,
+            sha: createRes.data?.content?.sha,
+            sizeBytes: oldFileRes.data.size || 0,
+            createdAt: nowFa,
+            lastModified: nowFa,
+            source: 'github',
+          };
+
+          return new Response(JSON.stringify({ success: true, asset: updatedAsset }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        // Memory Store Fallback
+        const matchIdx = memoryStore.media.findIndex(
+          (m) => m.path === oldValidation.normalizedPath || m.filename === oldValidation.filename
+        );
+        const cleanUrl = `/${fullNewPath.replace(/^public\//, '')}`;
+        const updatedAsset = {
+          id: `local-${Date.now()}-${safeNewFilename}`,
+          filename: safeNewFilename,
+          fileType: newValidation.fileType || 'image',
+          mimeType: newValidation.mimeType || 'application/octet-stream',
+          url: cleanUrl,
+          rawUrl: cleanUrl,
+          path: fullNewPath,
+          sizeBytes: matchIdx >= 0 ? memoryStore.media[matchIdx].sizeBytes : 100000,
+          createdAt: nowFa,
+          lastModified: nowFa,
+          source: 'local',
+        };
+
+        if (matchIdx >= 0) {
+          memoryStore.media[matchIdx] = updatedAsset;
+        } else {
+          memoryStore.media.unshift(updatedAsset);
+        }
+
+        return new Response(JSON.stringify({ success: true, asset: updatedAsset, localFallback: true }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // 6.4 Delete Media from GitHub Repository (DELETE /api/media/* or DELETE /api/media)
+      if (
+        (url.pathname === '/api/media' || url.pathname.startsWith('/api/media/')) &&
+        request.method === 'DELETE'
+      ) {
+        const auth = await isAuthorized(request, env);
+        if (!auth.authorized) {
+          return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        let targetPath = url.searchParams.get('path') || '';
+        let sha = url.searchParams.get('sha') || '';
+        let idParam = '';
+
+        if (!targetPath) {
+          const pathSegment = url.pathname.replace(/^\/api\/media\/?/, '');
+          if (pathSegment) {
+            targetPath = decodeURIComponent(pathSegment);
+          }
+        }
+
+        // Check if JSON body with path/sha was provided
+        if (!targetPath) {
+          try {
+            const body = (await request.json().catch(() => ({}))) as any;
+            targetPath = body.path || '';
+            sha = sha || body.sha || '';
+            idParam = body.id || '';
+          } catch {
+            // body optional
+          }
+        }
+
+        // If targetPath was passed as a simple ID like 'r2-media-1'
+        if (targetPath && !targetPath.includes('/') && !targetPath.includes('.')) {
+          idParam = targetPath;
+          const found = memoryStore.media.find((m) => m.id === idParam);
+          if (found && found.path) {
+            targetPath = found.path;
+          }
+        }
+
+        if (!targetPath) {
+          return new Response(JSON.stringify({ error: 'مسیر فایل جهت حذف مشخص نشده است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const validation = sanitizeAndValidateMediaPath(targetPath);
+        if (!validation.valid || !validation.normalizedPath) {
+          return new Response(JSON.stringify({ error: validation.error || 'مسیر فایل نامعتبر است.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
+
+        const hasToken = Boolean(env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim().length > 0);
+        const branch = env.GITHUB_BRANCH || 'main';
+
+        if (hasToken) {
+          // If SHA not provided by client, query file info from GitHub first
+          if (!sha) {
+            const fileInfo = await fetchFromGitHubContents(validation.normalizedPath, env);
+            if (fileInfo.ok && fileInfo.data?.sha) {
+              sha = fileInfo.data.sha;
+            }
+          }
+
+          if (sha) {
+            const deleteRes = await fetchFromGitHubContents(validation.normalizedPath, env, {
+              method: 'DELETE',
+              body: {
+                message: `Delete media: ${validation.filename} via Admin Media Manager`,
+                sha,
+                branch,
+              },
+            });
+
+            if (!deleteRes.ok && deleteRes.status !== 404) {
+              return new Response(
+                JSON.stringify({ error: `خطا در حذف فایل از گیت‌هاب: ${deleteRes.data?.message || 'نامشخص'}` }),
+                { status: deleteRes.status || 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+              );
+            }
+          }
+        }
+
+        // Also clean up from D1 / memoryStore
+        if (env.DB) {
+          try {
+            await env.DB.prepare('DELETE FROM media_assets WHERE filename = ? OR id = ?')
+              .bind(validation.filename, idParam || targetPath)
+              .run();
+          } catch {
+            // ignore
+          }
+        }
+        memoryStore.media = memoryStore.media.filter(
+          (m) => m.path !== validation.normalizedPath && m.filename !== validation.filename && m.id !== idParam
+        );
+
+        return new Response(
+          JSON.stringify({ success: true, path: validation.normalizedPath, message: 'فایل با موفقیت حذف شد.' }),
+          { headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+        );
+      }
+
+      // 6.5 Add Media by Direct External URL (Kept for full backward compatibility)
       if (url.pathname === '/api/media/add-url' && request.method === 'POST') {
         const auth = await isAuthorized(request, env);
         if (!auth.authorized) {
@@ -963,7 +1707,7 @@ export default {
 
         const fileId = `url-media-${Date.now()}`;
         const filename = body.filename || 'رسانه اختصاصی';
-        const fileType = body.fileType || 'image';
+        const fileType = (body.fileType as any) || 'image';
         const mimeType = fileType === 'audio' ? 'audio/mpeg' : fileType === 'video' ? 'video/mp4' : 'image/jpeg';
         const createdAt = new Date().toLocaleDateString('fa-IR');
 
@@ -973,8 +1717,12 @@ export default {
           fileType,
           mimeType,
           url: body.url,
+          rawUrl: body.url,
+          path: '',
           sizeBytes: 0,
           createdAt,
+          lastModified: createdAt,
+          source: 'd1',
         };
 
         if (env.DB) {
@@ -993,95 +1741,22 @@ export default {
         });
       }
 
-      // 6.4 Upload Media to R2 Bucket (with graceful fallback if R2 is not enabled)
-      if (url.pathname === '/api/upload' && request.method === 'POST') {
-        const auth = await isAuthorized(request, env);
-        if (!auth.authorized) {
-          return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز برای آپلود فایل.' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
+      // 6.6 Raw Media Stream (Optional R2 compatibility)
+      const rawMediaMatch = url.pathname.match(/^\/api\/media\/raw\/([^/]+)$/);
+      if (rawMediaMatch && request.method === 'GET') {
+        const key = rawMediaMatch[1];
+        if (env.MEDIA_BUCKET) {
+          const object = await env.MEDIA_BUCKET.get(key);
+          if (!object) {
+            return new Response('File Not Found in R2 Bucket', { status: 404, headers: corsHeaders });
+          }
+          const headers = new Headers();
+          object.writeHttpMetadata(headers);
+          headers.set('etag', object.httpEtag);
+          headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+          return new Response(object.body, { headers });
         }
-
-        const formData = await request.formData();
-        const file = formData.get('file') as File | null;
-
-        if (!file) {
-          return new Response(JSON.stringify({ error: 'فایلی ارسال نشده است.' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
-        }
-
-        // If R2 is not bound in production, notify gracefully without crashing
-        if (!env.MEDIA_BUCKET) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              r2Active: false,
-              error: 'فضای ابری R2 در حال حاضر فعال نیست (اختیاری). لطفاً از دکمه افزودن لینک مستقیم رسانه استفاده نمایید.',
-            }),
-            { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-          );
-        }
-
-        const fileId = `r2-${Date.now()}`;
-        const key = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-        const mimeType = file.type || 'application/octet-stream';
-        const fileType = mimeType.startsWith('audio') ? 'audio' : mimeType.startsWith('video') ? 'video' : 'image';
-        const createdAt = new Date().toLocaleDateString('fa-IR');
-        let fileUrl = `/api/media/raw/${key}`;
-
-        const buffer = await file.arrayBuffer();
-        await env.MEDIA_BUCKET.put(key, buffer, {
-          httpMetadata: { contentType: mimeType },
-        });
-
-        const newAsset = {
-          id: fileId,
-          filename: file.name,
-          fileType,
-          mimeType,
-          url: fileUrl,
-          sizeBytes: file.size,
-          createdAt,
-        };
-
-        if (env.DB) {
-          await env.DB.prepare(
-            'INSERT INTO media_assets (id, filename, file_type, mime_type, url, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-          )
-            .bind(fileId, file.name, fileType, mimeType, fileUrl, file.size, createdAt)
-            .run();
-        } else {
-          memoryStore.media.unshift(newAsset);
-        }
-
-        return new Response(JSON.stringify(newAsset), {
-          status: 201,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
-      }
-
-      // 6.5 Delete Media
-      const deleteMediaMatch = url.pathname.match(/^\/api\/media\/([^/]+)$/);
-      if (deleteMediaMatch && request.method === 'DELETE') {
-        const auth = await isAuthorized(request, env);
-        if (!auth.authorized) {
-          return new Response(JSON.stringify({ error: 'دسترسی غیرمجاز.' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
-        }
-        const mediaId = deleteMediaMatch[1];
-        if (env.DB) {
-          await env.DB.prepare('DELETE FROM media_assets WHERE id = ?').bind(mediaId).run();
-        } else {
-          memoryStore.media = memoryStore.media.filter((m) => m.id !== mediaId);
-        }
-        return new Response(JSON.stringify({ success: true, id: mediaId }), {
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+        return new Response('مخزن R2 فعال نیست', { status: 404, headers: corsHeaders });
       }
 
       // -------------------------------------------------------------

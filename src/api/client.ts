@@ -233,10 +233,41 @@ export const api = {
     return { status: 'ok', hasD1: true, hasR2: false, r2Status: 'optional_disabled' };
   },
 
-  // Media API (R2 Cloudflare Integration & Direct URL Support)
-  async fetchMediaList(): Promise<MediaAsset[]> {
+  // Media API (GitHub Repository Contents API Integration & R2/URL Support)
+  async fetchMediaStatus(): Promise<{
+    githubConfigured: boolean;
+    owner: string;
+    repo: string;
+    branch: string;
+    directories: string[];
+    maxSizeBytes: number;
+  }> {
     try {
-      const res = await fetch(`${API_BASE}/media`);
+      const res = await fetch(`${API_BASE}/media/status`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('API fetchMediaStatus failed');
+    }
+    return {
+      githubConfigured: false,
+      owner: 'aliinndd',
+      repo: 'dance',
+      branch: 'main',
+      directories: ['public/images', 'public/audio', 'public/videos'],
+      maxSizeBytes: 104857600,
+    };
+  },
+
+  async fetchMediaList(category?: string, search?: string): Promise<MediaAsset[]> {
+    try {
+      const params = new URLSearchParams();
+      if (category && category !== 'all') params.append('category', category);
+      if (search) params.append('search', search);
+      const queryString = params.toString() ? `?${params.toString()}` : '';
+
+      const res = await fetch(`${API_BASE}/media${queryString}`);
       if (res.ok) {
         const data = await res.json();
         return Array.isArray(data) ? data : data.media || [];
@@ -245,6 +276,77 @@ export const api = {
       console.warn('API fetchMediaList failed');
     }
     return [];
+  },
+
+  async uploadMedia(
+    file: File,
+    folder?: 'public/images' | 'public/audio' | 'public/videos',
+    customFilename?: string
+  ): Promise<{ success: boolean; asset?: MediaAsset; error?: string }> {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (folder) formData.append('folder', folder);
+      if (customFilename) formData.append('filename', customFilename);
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('admin_auth_token') : null;
+
+      const res = await fetch(`${API_BASE}/media/upload`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        return { success: true, asset: data.asset || data };
+      }
+      return { success: false, error: data.error || 'خطا در آپلود فایل به مخزن' };
+    } catch (e: any) {
+      console.error('File upload error:', e);
+      return { success: false, error: e?.message || 'خطای شبکه در هنگام آپلود فایل' };
+    }
+  },
+
+  async renameMedia(
+    oldPath: string,
+    newFilename: string,
+    targetFolder?: string
+  ): Promise<{ success: boolean; asset?: MediaAsset; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/media/rename`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify({ oldPath, newFilename, targetFolder }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        return { success: true, asset: data.asset };
+      }
+      return { success: false, error: data.error || 'خطا در تغییر نام فایل' };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'خطای ارتباط با سرور' };
+    }
+  },
+
+  async deleteMedia(pathOrId: string, sha?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const params = new URLSearchParams();
+      params.append('path', pathOrId);
+      if (sha) params.append('sha', sha);
+
+      const res = await fetch(`${API_BASE}/media?${params.toString()}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        return { success: true };
+      }
+      return { success: false, error: data.error || 'خطا در حذف فایل' };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'خطا در برقراری ارتباط' };
+    }
   },
 
   async addMediaUrl(url: string, filename: string, fileType: 'image' | 'audio' | 'video'): Promise<MediaAsset | null> {
@@ -262,42 +364,5 @@ export const api = {
       console.error('API addMediaUrl error:', e);
     }
     return null;
-  },
-
-  async uploadMedia(file: File): Promise<{ asset?: MediaAsset; r2Active?: boolean; error?: string } | null> {
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const token = typeof window !== 'undefined' ? localStorage.getItem('admin_auth_token') : null;
-
-      const res = await fetch(`${API_BASE}/upload`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.r2Active === false) {
-          return { r2Active: false, error: data.error };
-        }
-        return { asset: data, r2Active: true };
-      }
-    } catch (e) {
-      console.error('File upload error:', e);
-    }
-    return null;
-  },
-
-  async deleteMedia(id: string): Promise<boolean> {
-    try {
-      const res = await fetch(`${API_BASE}/media/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
-      return res.ok;
-    } catch (e) {
-      return false;
-    }
   },
 };

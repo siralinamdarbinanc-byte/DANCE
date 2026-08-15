@@ -20,29 +20,118 @@ let mediaAssetsStore: any[] = [
     filename: 'tango_masterclass_banner.jpg',
     fileType: 'image',
     mimeType: 'image/jpeg',
-    url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+    url: '/images/tango_masterclass_banner.jpg',
+    rawUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+    path: 'public/images/tango_masterclass_banner.jpg',
     sizeBytes: 420000,
     createdAt: '1403/05/20',
+    lastModified: '1403/05/20',
+    source: 'local',
   },
   {
     id: 'r2-media-2',
     filename: 'wedding_valse_golden_edit.mp3',
     fileType: 'audio',
     mimeType: 'audio/mpeg',
-    url: 'https://cdn.freesound.org/previews/530/530415_1648170-lq.mp3',
+    url: '/audio/wedding_valse_golden_edit.mp3',
+    rawUrl: 'https://cdn.freesound.org/previews/530/530415_1648170-lq.mp3',
+    path: 'public/audio/wedding_valse_golden_edit.mp3',
     sizeBytes: 3800000,
     createdAt: '1403/05/22',
+    lastModified: '1403/05/22',
+    source: 'local',
   },
   {
     id: 'r2-media-3',
     filename: 'bride_solo_entrance_preview.mp4',
     fileType: 'video',
     mimeType: 'video/mp4',
-    url: 'https://assets.mixkit.co/videos/preview/mixkit-bride-walking-down-the-aisle-41716-large.mp4',
+    url: '/videos/bride_solo_entrance_preview.mp4',
+    rawUrl: 'https://assets.mixkit.co/videos/preview/mixkit-bride-walking-down-the-aisle-41716-large.mp4',
+    path: 'public/videos/bride_solo_entrance_preview.mp4',
     sizeBytes: 12400000,
     createdAt: '1403/05/24',
+    lastModified: '1403/05/24',
+    source: 'local',
   },
 ];
+
+const ALLOWED_DIRECTORIES = ['public/images', 'public/audio', 'public/videos'] as const;
+const ALLOWED_EXTENSIONS = {
+  image: ['.jpg', '.jpeg', '.png', '.webp'],
+  audio: ['.mp3', '.wav', '.m4a'],
+  video: ['.mp4', '.webm', '.mov'],
+};
+const MIME_MAP: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+};
+const MAX_MEDIA_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
+
+function sanitizeAndValidateMediaPath(rawPath: string) {
+  if (!rawPath || typeof rawPath !== 'string') {
+    return { valid: false, error: 'مسیر فایل نامعتبر است.' };
+  }
+  const decoded = decodeURIComponent(rawPath).trim();
+  if (
+    decoded.includes('..') ||
+    decoded.includes('\\') ||
+    decoded.includes('//') ||
+    /[\x00-\x1f\x7f]/.test(decoded)
+  ) {
+    return { valid: false, error: 'مسیر حاوی کاراکترهای غیرمجاز است.' };
+  }
+  let path = decoded.replace(/^\/+/, '');
+  if (path.startsWith('images/') || path.startsWith('audio/') || path.startsWith('videos/')) {
+    path = `public/${path}`;
+  }
+  const matchingFolder = ALLOWED_DIRECTORIES.find((dir) => path === dir || path.startsWith(`${dir}/`));
+  if (!matchingFolder) {
+    return { valid: false, error: 'فقط پوشه‌های public/images, public/audio و public/videos مجاز هستند.' };
+  }
+  const filename = path.split('/').pop() || '';
+  if (!filename || filename === matchingFolder.split('/').pop()) {
+    return { valid: true, normalizedPath: path, folder: matchingFolder };
+  }
+  const extMatch = filename.match(/\.([a-zA-Z0-9]+)$/);
+  if (!extMatch) {
+    return { valid: false, error: 'فایل بدون پسوند مجاز نیست.' };
+  }
+  const ext = `.${extMatch[1].toLowerCase()}`;
+  let fileType: 'image' | 'audio' | 'video';
+  if (matchingFolder === 'public/images') {
+    if (!ALLOWED_EXTENSIONS.image.includes(ext)) {
+      return { valid: false, error: `پسوند ${ext} برای تصاویر مجاز نیست.` };
+    }
+    fileType = 'image';
+  } else if (matchingFolder === 'public/audio') {
+    if (!ALLOWED_EXTENSIONS.audio.includes(ext)) {
+      return { valid: false, error: `پسوند ${ext} برای صدا مجاز نیست.` };
+    }
+    fileType = 'audio';
+  } else {
+    if (!ALLOWED_EXTENSIONS.video.includes(ext)) {
+      return { valid: false, error: `پسوند ${ext} برای ویدیو مجاز نیست.` };
+    }
+    fileType = 'video';
+  }
+  return {
+    valid: true,
+    normalizedPath: path,
+    folder: matchingFolder,
+    fileType,
+    mimeType: MIME_MAP[extMatch[1].toLowerCase()] || 'application/octet-stream',
+    filename,
+  };
+}
 
 // Helper middleware for Admin Auth verification
 const verifyAdminAuth = (req: Request, res: Response, next: () => void) => {
@@ -296,10 +385,131 @@ app.post('/api/content', verifyAdminAuth, (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
-// 5. R2 MEDIA ASSETS ENDPOINTS
+// 5. GITHUB REPOSITORY MEDIA MANAGER ENDPOINTS
 // -------------------------------------------------------------
+app.get('/api/media/status', (req: Request, res: Response) => {
+  res.json({
+    githubConfigured: false,
+    owner: 'aliinndd',
+    repo: 'dance',
+    branch: 'main',
+    directories: ALLOWED_DIRECTORIES,
+    maxSizeBytes: MAX_MEDIA_SIZE_BYTES,
+  });
+});
+
 app.get('/api/media', (req: Request, res: Response) => {
-  res.json(mediaAssetsStore);
+  const { category, search } = req.query as { category?: string; search?: string };
+  let list = [...mediaAssetsStore];
+  if (category && ['image', 'audio', 'video'].includes(category)) {
+    list = list.filter((m) => m.fileType === category);
+  }
+  if (search) {
+    const q = search.toLowerCase().trim();
+    list = list.filter((m) => (m.filename || '').toLowerCase().includes(q) || (m.path || '').toLowerCase().includes(q));
+  }
+  res.json(list);
+});
+
+app.post('/api/media/upload', verifyAdminAuth, (req: Request, res: Response) => {
+  const { filename, folder, contentBase64, customFilename } = req.body;
+  const safeName = (customFilename || filename || `file_${Date.now()}.jpg`).replace(/[\\/:*?"<>|]/g, '_').trim();
+  const targetFolder = folder && ALLOWED_DIRECTORIES.includes(folder) ? folder : 'public/images';
+  const fullPath = `${targetFolder}/${safeName}`;
+  const validation = sanitizeAndValidateMediaPath(fullPath);
+
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  const nowFa = new Date().toLocaleDateString('fa-IR');
+  const cleanUrl = `/${fullPath.replace(/^public\//, '')}`;
+  const newAsset = {
+    id: `local-${Date.now()}-${safeName}`,
+    filename: safeName,
+    fileType: validation.fileType || 'image',
+    mimeType: validation.mimeType || 'application/octet-stream',
+    url: cleanUrl,
+    rawUrl: cleanUrl,
+    path: fullPath,
+    sizeBytes: contentBase64 ? Math.round((contentBase64.length * 3) / 4) : 250000,
+    createdAt: nowFa,
+    lastModified: nowFa,
+    source: 'local',
+  };
+
+  mediaAssetsStore.unshift(newAsset);
+  res.status(201).json({ success: true, asset: newAsset });
+});
+
+app.put('/api/media/rename', verifyAdminAuth, (req: Request, res: Response) => {
+  const { oldPath, newFilename, targetFolder } = req.body;
+  if (!oldPath || !newFilename) {
+    return res.status(400).json({ error: 'مسیر قبلی و نام جدید الزامی است.' });
+  }
+
+  const oldValidation = sanitizeAndValidateMediaPath(oldPath);
+  if (!oldValidation.valid || !oldValidation.normalizedPath) {
+    return res.status(400).json({ error: oldValidation.error });
+  }
+
+  const destFolder = targetFolder || oldValidation.folder || 'public/images';
+  let safeName = newFilename.replace(/[\\/:*?"<>|]/g, '_').trim();
+  const oldExt = oldValidation.filename?.match(/\.[a-zA-Z0-9]+$/)?.[0] || '';
+  if (!safeName.includes('.') && oldExt) {
+    safeName += oldExt;
+  }
+
+  const fullNewPath = `${destFolder}/${safeName}`;
+  const newValidation = sanitizeAndValidateMediaPath(fullNewPath);
+  if (!newValidation.valid) {
+    return res.status(400).json({ error: newValidation.error });
+  }
+
+  const idx = mediaAssetsStore.findIndex((m) => m.path === oldValidation.normalizedPath || m.filename === oldValidation.filename);
+  const nowFa = new Date().toLocaleDateString('fa-IR');
+  const cleanUrl = `/${fullNewPath.replace(/^public\//, '')}`;
+
+  const updatedAsset = {
+    id: `local-${Date.now()}-${safeName}`,
+    filename: safeName,
+    fileType: newValidation.fileType || 'image',
+    mimeType: newValidation.mimeType || 'application/octet-stream',
+    url: cleanUrl,
+    rawUrl: cleanUrl,
+    path: fullNewPath,
+    sizeBytes: idx >= 0 ? mediaAssetsStore[idx].sizeBytes : 150000,
+    createdAt: nowFa,
+    lastModified: nowFa,
+    source: 'local',
+  };
+
+  if (idx >= 0) {
+    mediaAssetsStore[idx] = updatedAsset;
+  } else {
+    mediaAssetsStore.unshift(updatedAsset);
+  }
+
+  res.json({ success: true, asset: updatedAsset });
+});
+
+app.delete('/api/media', verifyAdminAuth, (req: Request, res: Response) => {
+  const targetPath = (req.query.path as string) || req.body?.path;
+  if (!targetPath) {
+    return res.status(400).json({ error: 'مسیر فایل جهت حذف الزامی است.' });
+  }
+  const validation = sanitizeAndValidateMediaPath(targetPath);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
+  }
+  mediaAssetsStore = mediaAssetsStore.filter((m) => m.path !== validation.normalizedPath && m.filename !== validation.filename);
+  res.json({ success: true, path: validation.normalizedPath });
+});
+
+app.delete('/api/media/:id', verifyAdminAuth, (req: Request, res: Response) => {
+  const { id } = req.params;
+  mediaAssetsStore = mediaAssetsStore.filter((m) => m.id !== id && m.path !== id && m.filename !== id);
+  res.json({ success: true, id });
 });
 
 app.post('/api/media/add-url', verifyAdminAuth, (req: Request, res: Response) => {
@@ -315,8 +525,12 @@ app.post('/api/media/add-url', verifyAdminAuth, (req: Request, res: Response) =>
     fileType: type,
     mimeType: type === 'audio' ? 'audio/mpeg' : type === 'video' ? 'video/mp4' : 'image/jpeg',
     url,
+    rawUrl: url,
+    path: '',
     sizeBytes: 0,
     createdAt: new Date().toLocaleDateString('fa-IR'),
+    lastModified: new Date().toLocaleDateString('fa-IR'),
+    source: 'local',
   };
 
   mediaAssetsStore.unshift(newAsset);
@@ -325,23 +539,21 @@ app.post('/api/media/add-url', verifyAdminAuth, (req: Request, res: Response) =>
 
 app.post('/api/upload', verifyAdminAuth, (req: Request, res: Response) => {
   const sampleMedia = {
-    id: `r2-${Date.now()}`,
+    id: `local-${Date.now()}`,
     filename: `upload_${Date.now()}.jpg`,
     fileType: 'image',
     mimeType: 'image/jpeg',
-    url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+    url: '/images/tango_masterclass_banner.jpg',
+    rawUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200',
+    path: `public/images/upload_${Date.now()}.jpg`,
     sizeBytes: 245000,
     createdAt: new Date().toLocaleDateString('fa-IR'),
+    lastModified: new Date().toLocaleDateString('fa-IR'),
+    source: 'local',
   };
 
   mediaAssetsStore.unshift(sampleMedia);
-  res.status(201).json(sampleMedia);
-});
-
-app.delete('/api/media/:id', verifyAdminAuth, (req: Request, res: Response) => {
-  const { id } = req.params;
-  mediaAssetsStore = mediaAssetsStore.filter((m) => m.id !== id);
-  res.json({ success: true, id });
+  res.status(201).json({ success: true, asset: sampleMedia });
 });
 
 // -------------------------------------------------------------

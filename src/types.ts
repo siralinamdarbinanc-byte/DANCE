@@ -361,7 +361,12 @@ export interface MediaAsset {
   fileType: 'image' | 'audio' | 'video';
   mimeType: string;
   url: string;
+  rawUrl?: string;
+  path?: string;
+  sha?: string;
   sizeBytes: number;
   createdAt: string;
+  lastModified?: string;
+  source?: 'github' | 'r2' | 'd1' | 'local';
 }
 
